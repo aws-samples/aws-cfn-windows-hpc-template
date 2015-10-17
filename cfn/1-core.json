@@ -1,0 +1,665 @@
+{
+	"AWSTemplateFormatVersion" : "2010-09-09",
+	"Description"              : "This CloudFormation stack creates the core infrastructure (network, AD, Bastion) for the deployment of Microsoft HPC Pack 2012 R2. **WARNING** This template creates two Amazon EC2 instances. You will be billed for the AWS resources used if you create a stack from this template.",
+	"Parameters"               : {
+		"KeyName" : {
+			"Description": "Name of an existing EC2 Key Pair",
+			"Type"       : "String",
+			"Default"    : ""
+		},
+		"RDPLocation" : {
+			"Description"          : "Lockdown RDP access to the bastion host (default can be accessed from anywhere)",
+			"Type"                 : "String",
+			"Default"              : "0.0.0.0/0",
+			"AllowedPattern"       : "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+			"ConstraintDescription": "must be a valid CIDR range of the form x.x.x.x/x."
+		},
+		"VPCCIDR" : {
+			"Description"   : "CIDR Block for the entire VPC",
+			"Type"          : "String",
+			"Default"       : "10.0.0.0/16",
+			"AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+		},
+		"PublicSubnetCIDR" : {
+			"Description"   : "CIDR Block for the Public Subnet (empty uses all VPC CIDR)",
+			"Type"          : "String",
+			"Default"       : "",
+			"AllowedPattern": "()|((\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2}))"
+		},
+		"DomainDNSName" : {
+			"Description"   : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.",
+			"Default"       : "awslab.local",
+			"Type"          : "String",
+			"AllowedPattern": "[a-zA-Z0-9]+\\..*"
+		},
+		"DomainNetBIOSName" : {
+			"Description"   : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+			"Type"          : "String",
+			"MinLength"     : "1",
+			"MaxLength"     : "15",
+			"Default"       : "AWSLAB",
+			"AllowedPattern": "[a-zA-Z0-9]+"
+		},
+		"HPCUserName" : {
+			"Description"   : "Logon Name of the HPC User user created for this installation",
+			"Type"          : "String",
+			"MinLength"     : "1",
+			"MaxLength"     : "255",
+			"Default"       : "HPCUser",
+			"AllowedPattern": "[a-zA-Z0-9]+"
+		},
+		"BastionAdminPassword" : {
+			"Description"   : "Password for the Administrator account of the Bastion host. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"AdministratorPassword" : {
+			"Description"   : "Password for the Domain Administrator account. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"RestoreModePassword" : {
+			"Description"   : "Password for a separate Administrator account when the domain controller is in Restore Mode. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"HPCUserPassword" : {
+			"Description"   : "Password for the HPC User account. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"AWSAmiId" : {
+			"Description"          : "Identifier of the Amazon Machine Image to use for the platforms (all machines are started using the same AMI). We use Microsoft Windows Server 2012 R2 Base 64bits.",
+			"Type"                 : "String",
+			"AllowedPattern"       : "ami-([0-9a-fA-F]{8})",
+			"ConstraintDescription": "must be a valid Amazon Machine Image (ami-xxxxxxxx)."
+		},
+		"BastionInstanceType" : {
+			"Description": "Instance type to use for the Bastion Instance",
+			"Type"       : "String",
+			"Default"    : "t2.large"
+		},
+		"DomainControllerInstanceType" : {
+			"Description": "Instance type to use for the Domain Controller Instance",
+			"Type"       : "String",
+			"Default"    : "t2.large"
+		}
+	},
+	"Conditions": {
+		"KeyNameDefined": { "Fn::Not": [ { "Fn::Equals": [ { "Ref": "KeyName" }, "" ] } ] },
+		"SubnetCIDRDefined": { "Fn::Not": [ { "Fn::Equals": [ { "Ref": "PublicSubnetCIDR" }, "" ] } ] }
+	},
+	"Resources" : {
+		"S3AccessRole": {
+			"Type"      : "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Version" : "2012-10-17",
+					"Statement": [ 
+						{ 
+							"Effect": "Allow",
+							"Principal": { "Service": [ "ec2.amazonaws.com" ] },
+							"Action": [ "sts:AssumeRole" ]
+						}
+					]
+				},
+				"Path": "/",
+				"Policies": [
+					{
+						"PolicyName"    : "S3Access",
+						"PolicyDocument": {
+							"Version"  : "2012-10-17",
+							"Statement": [
+								{
+									"Effect" : "Allow",
+									"Action" : ["s3:GetObject"],
+									"Resource" : "arn:aws:s3:::<DESTINATION>/*"
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+
+		"S3AccessProfile": {
+			"Type"      : "AWS::IAM::InstanceProfile",
+			"Properties": {
+				"Path" : "/",
+				"Roles": [ { "Ref": "S3AccessRole" } ]
+			}
+		},
+
+		"DomainControllerWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : ["DomainController"],
+			"Properties" : {
+				"Handle" : { "Ref" : "DomainControllerWaitHandle"},
+				"Timeout" : "7200"
+			}
+		},
+
+		"DomainControllerWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"BastionWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : ["Bastion"],
+			"Properties" : {
+				"Handle" : {"Ref" : "BastionWaitHandle"},
+				"Timeout" : "7200"
+			}
+		},
+
+		"BastionWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"VPC" : {
+			"Type" : "AWS::EC2::VPC",
+			"Properties" : {
+				"CidrBlock" : { "Ref" : "VPCCIDR" },
+		        "EnableDnsHostnames" : "true",
+		        "EnableDnsSupport" : "true",
+				"Tags" : [
+					{ "Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - VPC"] ] } }
+				]
+			}
+		},
+
+		"PublicSubnet" : {
+			"Type" : "AWS::EC2::Subnet",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"CidrBlock": { "Fn::If": [ "SubnetCIDRDefined", { "Ref": "PublicSubnetCIDR" }, { "Ref" : "VPCCIDR" } ] },
+				"AvailabilityZone" : { "Fn::Select" : [ "0", { "Fn::GetAZs" : { "Ref": "AWS::Region" } } ] },
+				"Tags" : [
+					{ "Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - Public Subnet"] ] } }
+				]
+			}
+		},
+
+		"InternetGateway" : {
+			"Type" : "AWS::EC2::InternetGateway",
+			"Properties" : {
+				"Tags" : [
+					{ "Key" : "Name", "Value" : "HPC" }
+				]
+			}
+		},
+
+		"AttachGateway" : {
+			"Type" : "AWS::EC2::VPCGatewayAttachment",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"InternetGatewayId" : { "Ref" : "InternetGateway" }
+			}
+		},
+
+		"PublicRouteTable" : {
+			"Type" : "AWS::EC2::RouteTable",
+			"Properties" : {
+				"VpcId" : { "Ref" : "VPC" },
+				"Tags"  : [
+					{ "Key" : "Name", "Value" : "Public" }
+				]
+			}
+		},
+
+		"PublicRoute" : {
+			"DependsOn" : ["AttachGateway"],
+			"Type" : "AWS::EC2::Route",
+			"Properties" : {
+				"RouteTableId" : { "Ref" : "PublicRouteTable" },
+				"DestinationCidrBlock" : "0.0.0.0/0",
+				"GatewayId" : { "Ref" : "InternetGateway" }
+			}
+		},
+
+		"PublicSubnetRouteTableAssociation" : {
+			"DependsOn" : ["PublicRoute"],
+			"Type" : "AWS::EC2::SubnetRouteTableAssociation",
+			"Properties" : {
+				"SubnetId" : { "Ref" : "PublicSubnet" },
+				"RouteTableId" : { "Ref" : "PublicRouteTable" }
+			}
+		},
+
+	    "PublicSubnetAcl" : {
+			"DependsOn" : ["PublicSubnetRouteTableAssociation"],
+	        "Type" : "AWS::EC2::NetworkAcl",
+	        "Properties" : {
+	          "VpcId" : {"Ref" : "VPC"},
+	          "Tags" : [
+	            {"Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - Public ACL"] ] } }
+	          ]
+	       }
+	    },
+
+	    "PublicSubnetAclEntryIn" : {
+	     	"Type" : "AWS::EC2::NetworkAclEntry",
+	    	"Properties" : {
+	        	"NetworkAclId" : {"Ref" : "PublicSubnetAcl"},
+	        	"RuleNumber" : "100",
+	        	"Protocol" : "-1",
+	        	"RuleAction" : "allow",
+	        	"Egress" : "false",
+	        	"CidrBlock" : "0.0.0.0/0",
+	        	"PortRange" : {"From" : "0", "To" : "65535"}
+	      	}
+	    },
+
+	    "PublicSubnetAclEntryOut" : {
+	        "Type" : "AWS::EC2::NetworkAclEntry",
+	        "Properties" : {
+	          "NetworkAclId" : {"Ref" : "PublicSubnetAcl"},
+	          "RuleNumber" : "100",
+	          "Protocol" : "-1",
+	          "RuleAction" : "allow",
+	          "Egress" : "true",
+	          "CidrBlock" : "0.0.0.0/0",
+	          "PortRange" : {"From" : "0", "To" : "65535"}
+	        }
+	    },
+
+	    "PublicSubnetAclAssociation" : {
+			"DependsOn" : ["PublicSubnetAclEntryIn", "PublicSubnetAclEntryOut"],
+	        "Type" : "AWS::EC2::SubnetNetworkAclAssociation",
+	        "Properties" : {
+	          "SubnetId" : { "Ref" : "PublicSubnet" },
+	          "NetworkAclId" : { "Ref" : "PublicSubnetAcl" }
+	        }
+	    },
+
+		"BastionSecurityGroup" : {
+			"DependsOn" : ["PublicSubnetAclAssociation"],
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Bastion: Enables RDP access via port 3389",
+				"VpcId" : { "Ref" : "VPC" },
+				"SecurityGroupIngress" : [{ "IpProtocol": "tcp", "FromPort": "3389", "ToPort": "3389", "CidrIp": { "Ref" : "RDPLocation" } } ],
+				"SecurityGroupEgress" : [{ "IpProtocol": "-1", "FromPort": "0", "ToPort": "65535", "CidrIp": "0.0.0.0/0" } ],
+				"Tags" : [
+					{"Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - Bastion SG"] ] } }
+				]
+			}
+		},
+
+		"ClusterSecurityGroup" : {
+			"DependsOn" : ["BastionSecurityGroup"],
+			"Type" : "AWS::EC2::SecurityGroup",
+			"Properties" : {
+				"GroupDescription" : "Cluster: Enables RDP access via port 3389 from Bastion, all traffic from within the group",
+				"VpcId" : { "Ref" : "VPC" },
+				"SecurityGroupIngress" : [
+					{ "IpProtocol": "tcp", "FromPort": "3389", "ToPort": "3389", "SourceSecurityGroupId": { "Ref" : "BastionSecurityGroup" } },
+					{ "IpProtocol": "tcp", "FromPort": "53", "ToPort": "53", "SourceSecurityGroupId": { "Ref" : "BastionSecurityGroup" } },
+					{ "IpProtocol": "udp", "FromPort": "53", "ToPort": "53", "SourceSecurityGroupId": { "Ref" : "BastionSecurityGroup" } }
+				],
+				"SecurityGroupEgress" : [{ "IpProtocol": "-1", "FromPort": "1", "ToPort": "65535", "CidrIp": "0.0.0.0/0" } ],
+				"Tags" : [
+					{"Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - Cluster SG"] ] } }
+				]
+			}
+		},
+
+        "ClusterSecurityGroupIngress": {
+            "Type": "AWS::EC2::SecurityGroupIngress",
+            "Properties": {
+                "GroupId": { "Ref": "ClusterSecurityGroup" },
+                "IpProtocol": "-1",
+                "FromPort": "0",
+                "ToPort": "65535",
+                "SourceSecurityGroupId": { "Ref": "ClusterSecurityGroup" }
+            }
+        },
+
+		"Bastion": {
+			"DependsOn" : ["VPCDHCPOptionsAssoc"],
+			"Type": "AWS::EC2::Instance",
+			"Metadata": {
+				"AWS::CloudFormation::Authentication": {
+					"rolebased" : {
+						"type": "S3",
+						"buckets": [ "<BUCKETNAME>" ],
+						"roleName": { "Ref": "S3AccessRole" }
+					}
+				},
+				"AWS::CloudFormation::Init": {
+					"configSets": {
+						"config": [
+							"1-setup",
+							"2-run"
+						]
+					},
+					"1-setup": {
+						"files": {
+							"C:\\cfn\\cfn-hup.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-hup.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+							"C:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-auto-reloader.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"ResourceName" : "Bastion",
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+			                "C:\\cfn\\install\\local-admin-password.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/local-admin-password.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"AdministratorPassword" : { "Ref" : "BastionAdminPassword" }
+								}
+							},
+							"C:\\cfn\\install\\rename-computer.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/rename-computer.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\configure-network.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/configure-member-network.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\change-administrator-password.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/change-administrator-password.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\CleanupFiles.cmd" : {
+								"content": { 
+									"Fn::Join" : ["\n", [
+										"DEL c:\\cfn\\install\\local-admin-password.conf"
+									] ]
+								}
+			                }
+						},
+						"services" : {
+							"windows" : {
+								"cfn-hup" : {
+									"enabled" : "true",
+									"ensureRunning" : "true",
+									"files" : [ "c:\\cfn\\cfn-hup.conf", "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"]
+								}
+							}
+						}
+					},
+					"2-run": {
+						"commands": {
+							"01-change-password": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\change-administrator-password.ps1 -PasswordFile c:\\cfn\\install\\local-admin-password.conf",
+								"waitAfterCompletion": "0"
+							},
+							"02-rename-computer": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\rename-computer.ps1 -ComputerName bastion",
+								"waitAfterCompletion": "forever"
+							},
+							"03-configure-network": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\configure-network.ps1 -DomainDNSName ", { "Ref": "DomainDNSName" }, " -InterfaceNewName Public" ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"04-cleanup-files": {
+								"command": "C:\\cfn\\install\\CleanupFiles.cmd",
+								"waitAfterCompletion": "0"
+							},
+							"05-signal-success": {
+								"command": { "Fn::Join" : ["", [ "cfn-signal.exe -e 0 \"", { "Fn::Base64" : { "Ref" : "BastionWaitHandle" } }, "\"" ] ] },
+								"waitAfterCompletion": "0"
+							}
+						}
+					}
+				}
+			},
+			"Properties": {
+				"ImageId": { "Ref" : "AWSAmiId" },
+				"InstanceType": { "Ref": "BastionInstanceType" },
+				"IamInstanceProfile": { "Ref": "S3AccessProfile" },
+				"KeyName": { "Fn::If": [ "KeyNameDefined", { "Ref": "KeyName" }, { "Ref" : "AWS::NoValue" } ] },
+				"Tags": [
+					{ "Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - Bastion"] ] } }
+				],
+				"BlockDeviceMappings": [
+					{ "DeviceName" : "/dev/sda1", "Ebs" : { "VolumeType" : "gp2" } }
+				],
+				"NetworkInterfaces": [
+					{ "AssociatePublicIpAddress": "true", "DeviceIndex": 0, "SubnetId": { "Ref" : "PublicSubnet" }, "GroupSet": [ { "Ref": "BastionSecurityGroup" } ] }
+				],
+				"UserData": {
+					"Fn::Base64": { 
+						"Fn::Join": [ "", [
+							"<script>\n",
+							"cfn-init.exe -v -c config -s ", {"Ref": "AWS::StackId"}, " -r Bastion ", " --region ", {"Ref": "AWS::Region"}, "\n",
+							"</script>"
+						] ]
+					}
+				}
+			}
+		},
+
+		"DomainController": {
+			"DependsOn": ["ClusterSecurityGroupIngress"],
+			"Type": "AWS::EC2::Instance",
+			"Metadata": {
+				"AWS::CloudFormation::Authentication": {
+					"rolebased" : {
+						"type": "S3",
+						"buckets": [ "<BUCKETNAME>" ],
+						"roleName": { "Ref": "S3AccessRole" }
+					}
+				},
+				"AWS::CloudFormation::Init": {
+					"configSets": {
+						"config": [
+							"1-setup",
+							"2-run"
+						]
+					},
+					"1-setup": {
+						"files": {
+							"C:\\cfn\\cfn-hup.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-hup.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+							"C:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-auto-reloader.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"ResourceName" : "DomainController",
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+			                "C:\\cfn\\install\\local-admin-password.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/local-admin-password.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"AdministratorPassword" : { "Ref" : "AdministratorPassword" }
+								}
+							},
+			                "c:\\cfn\\install\\hpc-user-info.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/hpc-user-info.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"DomainDNSName" : { "Ref" : "DomainDNSName" },
+									"DomainNetBIOSName": { "Ref" : "DomainNetBIOSName" },
+									"HPCUserName" : { "Ref" : "HPCUserName" },
+									"HPCUserPassword": { "Ref" : "HPCUserPassword" }
+								}
+							},
+			                "c:\\cfn\\install\\domain-info.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/domain-info.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"DomainDNSName" : { "Ref" : "DomainDNSName" },
+									"DomainNetBIOSName": { "Ref" : "DomainNetBIOSName" },
+									"RestoreModePassword": { "Ref" : "RestoreModePassword" }
+								}
+							},
+							"C:\\cfn\\install\\rename-computer.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/rename-computer.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\configure-network.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/configure-dc-network.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\change-administrator-password.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/change-administrator-password.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\dc-promo.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/dc-promo.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\wait-dc-services-ready.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/wait-dc-services-ready.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\create-hpc-user.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/create-hpc-user.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\CleanupFiles.cmd" : {
+								"content": { 
+									"Fn::Join" : ["\n", [
+										"DEL c:\\cfn\\install\\hpc-user-info.conf",
+										"DEL c:\\cfn\\install\\local-admin-password.conf",
+										"DEL c:\\cfn\\install\\domain-info.conf"
+									] ]
+								}
+			                }
+						},
+						"services" : {
+							"windows" : {
+								"cfn-hup" : {
+									"enabled" : "true",
+									"ensureRunning" : "true",
+									"files" : [ "c:\\cfn\\cfn-hup.conf", "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"]
+								}
+							}
+						}
+					},
+					"2-run": {
+						"commands": {
+							"01-change-password": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\change-administrator-password.ps1 -PasswordFile c:\\cfn\\install\\local-admin-password.conf",
+								"waitAfterCompletion": "0"
+							},
+							"02-configure-network": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\configure-network.ps1 -DomainDNSName ", { "Ref": "DomainDNSName" }, " -InterfaceNewName Private" ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"03-rename-computer": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\rename-computer.ps1 -ComputerName dc",
+								"waitAfterCompletion": "forever"
+							},
+							"04-run-dcpromo": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\dc-promo.ps1 -ConfigFile c:\\cfn\\install\\domain-info.conf",
+								"waitAfterCompletion": "forever"
+							},
+							"05-wait-reboot": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\wait-dc-services-ready.ps1",
+								"waitAfterCompletion": "60"
+							},
+							"06-create-user": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\create-hpc-user.ps1 -UserFile c:\\cfn\\install\\hpc-user-info.conf",
+								"waitAfterCompletion": "10"
+							},
+							"07-cleanup-files": {
+								"command": "C:\\cfn\\install\\CleanupFiles.cmd",
+								"waitAfterCompletion": "0"
+							},
+							"08-signal-success": {
+								"command": { "Fn::Join" : ["", [ "cfn-signal.exe -e 0 \"", { "Fn::Base64" : { "Ref" : "DomainControllerWaitHandle" } }, "\"" ] ] },
+								"waitAfterCompletion": "0"
+							}
+						}
+					}
+				}
+			},
+			"Properties": {
+				"ImageId": { "Ref" : "AWSAmiId" },
+				"InstanceType": { "Ref": "DomainControllerInstanceType" },
+				"IamInstanceProfile": { "Ref": "S3AccessProfile" },
+				"Tags"         : [
+					{ "Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - Domain Controller"] ] } }
+				],
+				"KeyName": { "Fn::If": [ "KeyNameDefined", { "Ref": "KeyName" }, { "Ref" : "AWS::NoValue" } ] },
+				"NetworkInterfaces": [
+					{ "AssociatePublicIpAddress": "true", "DeviceIndex": 0, "SubnetId": { "Ref" : "PublicSubnet" }, "GroupSet": [ { "Ref": "ClusterSecurityGroup" } ] }
+				],
+				"BlockDeviceMappings": [
+					{ "DeviceName" : "/dev/sda1", "Ebs" : { "VolumeType" : "gp2" } }
+				],
+				"UserData": {
+					"Fn::Base64": { 
+						"Fn::Join": [ "", [
+							"<script>\n",
+							"cfn-init.exe -v -c config -s ", {"Ref": "AWS::StackId"}, " -r DomainController ", " --region ", {"Ref": "AWS::Region"}, "\n",
+							"</script>"
+						] ]
+					}
+				}
+			}
+		},
+
+		"VPCDHCPOptions": {
+			"DependsOn" : ["DomainController"],
+			"Type" : "AWS::EC2::DHCPOptions",
+			"Properties" : {
+				"DomainName" : { "Ref" : "DomainDNSName" },
+				"DomainNameServers" : [  { "Fn::GetAtt" : [ "DomainController", "PrivateIp" ] } ],
+				"NetbiosNameServers" : [  { "Fn::GetAtt" : [ "DomainController", "PrivateIp" ] } ],
+				"NetbiosNodeType" : 2,
+				"NtpServers" : [  { "Fn::GetAtt" : [ "DomainController", "PrivateIp" ] } ],
+				"Tags" : [
+					{ "Key" : "Name", "Value" : { "Fn::Join": ["", [ {"Ref": "AWS::StackName"}, " - HPC"] ] } }
+				]
+			}
+		},
+
+		"VPCDHCPOptionsAssoc": { 
+			"DependsOn" : ["DomainControllerWaitCondition"],
+			"Type" : "AWS::EC2::VPCDHCPOptionsAssociation",
+			"Properties" : {
+				"DhcpOptionsId" : { "Ref": "VPCDHCPOptions" },
+				"VpcId" : { "Ref": "VPC" }
+			}
+		}
+	},
+	"Outputs" : {
+		"ClusterSubnetID" : {
+			"Description" : "Identifier of the subnet created for the cluster",
+			"Value" : { "Ref": "PublicSubnet" }
+		},
+		"ClusterSecurityGroupID" : {
+			"Description" : "Identifier of the Security Group created for the cluster",
+			"Value" : { "Ref": "ClusterSecurityGroup" }
+		},
+		"Bastion" : {
+			"Description" : "Public IP Address of the bastion host",
+			"Value" : { "Fn::GetAtt": [ "Bastion", "PublicIp" ] }
+		}
+	}
+}

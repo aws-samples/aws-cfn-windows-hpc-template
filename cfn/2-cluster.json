@@ -1,0 +1,592 @@
+{
+	"AWSTemplateFormatVersion" : "2010-09-09",
+	"Description"              : "This CloudFormation stack creates a Microsoft HPC Pack 2012 R2 Cluster in an existing environment. **WARNING** This template creates two or more Amazon EC2 instances. You will be billed for the AWS resources used if you create a stack from this template.",
+	"Parameters"               : {
+		"KeyName" : {
+			"Description": "Name of an existing EC2 Key Pair",
+			"Type"       : "String",
+			"Default"    : ""
+		},
+		"SnapshotID" : {
+			"Description"          : "Snapshot Id of the HPC Installation data",
+			"Type"                 : "String",
+			"AllowedPattern"       : "snap-([0-9a-fA-F]{8})",
+			"ConstraintDescription": "must be a valid snapshot ID."
+		},
+		"ClusterSubnetID" : {
+			"Description"          : "Subnet Id of the HPC cluster",
+			"Type"                 : "String",
+			"AllowedPattern"       : "subnet-([0-9a-fA-F]{8})",
+			"ConstraintDescription": "must be a valid subnet ID."
+		},
+		"ClusterSecurityGroupID" : {
+			"Description"          : "Security Group Id of the HPC cluster",
+			"Type"                 : "String",
+			"AllowedPattern"       : "sg-([0-9a-fA-F]{8})",
+			"ConstraintDescription": "must be a valid security group ID."
+		},
+		"DomainDNSName" : {
+			"Description"   : "Fully qualified domain name (FQDN) of the forest root domain e.g. corp.example.",
+			"Default"       : "awslab.local",
+			"Type"          : "String",
+			"AllowedPattern": "[a-zA-Z0-9]+\\..*"
+		},
+		"DomainNetBIOSName" : {
+			"Description"   : "NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. CORP",
+			"Type"          : "String",
+			"MinLength"     : "1",
+			"MaxLength"     : "15",
+			"Default"       : "AWSLAB",
+			"AllowedPattern": "[a-zA-Z0-9]+"
+		},
+		"HPCUserName" : {
+			"Description"   : "Logon Name of the HPC User user created for this installation",
+			"Type"          : "String",
+			"MinLength"     : "1",
+			"MaxLength"     : "255",
+			"Default"       : "HPCUser",
+			"AllowedPattern": "[a-zA-Z0-9]+"
+		},
+		"HPCUserPassword" : {
+			"Description"   : "Password for the HPC User account. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"AWSAmiId" : {
+			"Description"          : "Identifier of the Amazon Machine Image to use for the platforms (all machines are started using the same AMI). We use Microsoft Windows Server 2012 R2 Base 64bits.",
+			"Type"                 : "String",
+			"AllowedPattern"       : "ami-([0-9a-fA-F]{8})",
+			"ConstraintDescription": "must be a valid Amazon Machine Image (ami-xxxxxxxx)."
+		},
+		"HeadNodeInstanceType" : {
+			"Description": "Instance type to use for the Head Node Instance",
+			"Type"       : "String",
+			"Default"    : "m4.2xlarge"
+		},
+		"ComputeNodeInstanceType" : {
+			"Description": "Instance type to use for the Compute Node Instance",
+			"Type"       : "String",
+			"Default"    : "c3.8xlarge"
+		},
+		"ClusterPlacementGroup" : {
+			"Description": "Name of an existing placement group for the cluster nodes (no placement group if empty)",
+			"Type"       : "String",
+			"Default"    : ""
+		},
+		"ComputeNodeInstanceCount" : {
+			"Description": "Number of compute nodes to start initially",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "2"
+		},
+		"ComputeNodeInstanceCountIncrease" : {
+			"Description": "Number of compute nodes to start when the first alarm is raised",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "2"
+		},
+		"AlarmThreshold" : {
+			"Description": "Target maximum number of cluster compute hours (scale if more)",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "2"
+		},
+		"ComputeNodeInstanceMinCount" : {
+			"Description": "Minimum number of compute nodes to start",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "2"
+		},
+		"ComputeNodeInstanceMaxCount" : {
+			"Description": "Maximum number of compute nodes to start",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "50"
+		}
+	},
+	"Conditions": {
+		"KeyNameDefined": { "Fn::Not": [ { "Fn::Equals": [ { "Ref": "KeyName" }, "" ] } ] },
+		"ClusterPlacementGroupDefined": { "Fn::Not": [ { "Fn::Equals": [ { "Ref": "ClusterPlacementGroup" }, "" ] } ] }
+	},
+	"Resources" : {
+		"HeadNodeRole": {
+			"Type"      : "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Version" : "2012-10-17",
+					"Statement": [ 
+						{ 
+							"Effect": "Allow",
+							"Principal": { "Service": [ "ec2.amazonaws.com" ] },
+							"Action": [ "sts:AssumeRole" ]
+						}
+					]
+				},
+				"Path": "/",
+				"Policies": [
+					{
+						"PolicyName"    : "S3AccessAndPutMetricData",
+						"PolicyDocument": {
+							"Version"  : "2012-10-17",
+							"Statement": [
+								{
+									"Effect" : "Allow",
+									"Action" : ["cloudwatch:PutMetricData"],
+									"Resource" : "*"
+								},
+								{
+									"Effect" : "Allow",
+									"Action" : ["s3:GetObject"],
+									"Resource" : "arn:aws:s3:::<DESTINATION>/*"
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+
+		"HeadNodeProfile": {
+			"Type"      : "AWS::IAM::InstanceProfile",
+			"Properties": {
+				"Path" : "/",
+				"Roles": [ { "Ref": "HeadNodeRole" } ]
+			}
+		},
+
+		"S3AccessRole": {
+			"Type"      : "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Version" : "2012-10-17",
+					"Statement": [ 
+						{ 
+							"Effect": "Allow",
+							"Principal": { "Service": [ "ec2.amazonaws.com" ] },
+							"Action": [ "sts:AssumeRole" ]
+						}
+					]
+				},
+				"Path": "/",
+				"Policies": [
+					{
+						"PolicyName"    : "S3Access",
+						"PolicyDocument": {
+							"Version"  : "2012-10-17",
+							"Statement": [
+								{
+									"Effect" : "Allow",
+									"Action" : ["s3:GetObject"],
+									"Resource" : "arn:aws:s3:::<DESTINATION>/*"
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+
+		"S3AccessProfile": {
+			"Type"      : "AWS::IAM::InstanceProfile",
+			"Properties": {
+				"Path" : "/",
+				"Roles": [ { "Ref": "S3AccessRole" } ]
+			}
+		},
+
+		"ComputeNodeWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : ["ComputeNodes"],
+			"Properties" : {
+				"Handle" : {"Ref" : "ComputeNodeWaitHandle"},
+				"Timeout" : "7200",
+				"Count" : { "Ref": "ComputeNodeInstanceCount" }
+			}
+		},
+
+		"ComputeNodeWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"HeadNodeWaitCondition" : {
+			"Type" : "AWS::CloudFormation::WaitCondition",
+			"DependsOn" : ["HeadNode"],
+			"Properties" : {
+				"Handle" : {"Ref" : "HeadNodeWaitHandle"},
+				"Timeout" : "7200"
+			}
+		},
+
+		"HeadNodeWaitHandle" : {
+			"Type" : "AWS::CloudFormation::WaitConditionHandle"
+		},
+
+		"HeadNode": {
+			"Type": "AWS::EC2::Instance",
+			"Metadata": {
+				"AWS::CloudFormation::Authentication": {
+					"rolebased" : {
+						"type": "S3",
+						"buckets": [ "<BUCKETNAME>" ],
+						"roleName": { "Ref": "HeadNodeRole" }
+					}
+				},
+				"AWS::CloudFormation::Init": {
+					"configSets": {
+						"config": [
+							"1-setup",
+							"2-run"
+						]
+					},
+					"1-setup": {
+						"files": {
+							"C:\\cfn\\cfn-hup.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-hup.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+							"C:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-auto-reloader.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"ResourceName" : "HeadNode",
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+			                "C:\\cfn\\install\\hpc-user-info.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/hpc-user-info.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"DomainDNSName" : { "Ref" : "DomainDNSName" },
+									"DomainNetBIOSName": { "Ref" : "DomainNetBIOSName" },
+									"HPCUserName" : { "Ref" : "HPCUserName" },
+									"HPCUserPassword": { "Ref" : "HPCUserPassword" }
+								}
+							},
+							"C:\\cfn\\install\\sql-config.conf" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/sql-config.conf",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\rename-computer.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/rename-computer.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\configure-network.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/configure-hpc-network.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\join-domain.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/join-domain.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\add-admin-user.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/add-admin-user.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\initialize-d-drive.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/initialize-d-drive.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\install-process.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/install-process-head.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\install-hpc-pack.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/install-hpc-pack-head.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\post-install-hpc-pack.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/post-install-hpc-pack-head.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\compute-metrics.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/compute-metrics.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\CleanupFiles.cmd" : {
+								"content": { 
+									"Fn::Join" : ["\n", [
+										"DEL c:\\cfn\\install\\hpc-user-info.conf"
+									] ]
+								}
+			                }
+						},
+						"services" : {
+							"windows" : {
+								"cfn-hup" : {
+									"enabled" : "true",
+									"ensureRunning" : "true",
+									"files" : [ "c:\\cfn\\cfn-hup.conf", "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"]
+								}
+							}
+						}
+					},
+					"2-run": {
+						"commands": {
+							"01-rename-computer": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\rename-computer.ps1 -ComputerName head-node",
+								"waitAfterCompletion": "forever"
+							},
+							"02-join-domain": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\join-domain.ps1 -DomainFile c:\\cfn\\install\\hpc-user-info.conf",
+								"waitAfterCompletion": "forever"
+							},
+							"03-add-user": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\add-admin-user.ps1 -LogonName ", { "Ref": "DomainNetBIOSName" }, "/", { "Ref": "HPCUserName" } ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"04-initialize-d-drive": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\initialize-d-drive.ps1 -DomainNetBIOSName ", { "Ref": "DomainNetBIOSName" } ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"05-configure-network": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\configure-network.ps1 -DomainDNSName ", { "Ref": "DomainDNSName" }, " -InterfaceNewName Enterprise" ] ] },
+								"waitAfterCompletion": "5"
+							},
+							"06-setup-hpcpack": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\install-process.ps1 -UserFile c:\\cfn\\install\\hpc-user-info.conf -Stack ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref": "AWS::Region" } ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"07-cleanup-files": {
+								"command": "C:\\cfn\\install\\CleanupFiles.cmd",
+								"waitAfterCompletion": "0"
+							},
+							"08-signal-success": {
+								"command": { "Fn::Join" : ["", [ "cfn-signal.exe -e 0 \"", { "Fn::Base64" : { "Ref" : "HeadNodeWaitHandle" } }, "\"" ] ] },
+								"waitAfterCompletion": "0"
+							}
+						}
+					}
+				}
+			},
+			"Properties": {
+				"ImageId": { "Ref" : "AWSAmiId" },
+				"InstanceType": { "Ref": "HeadNodeInstanceType" },
+				"IamInstanceProfile": { "Ref": "HeadNodeProfile" },
+				"Tags"         : [
+					{ "Key" : "Name", "Value" : { "Fn::Join": [ "", [ { "Ref": "AWS::StackName" },  " - Head Node" ] ] } }
+				],
+				"PlacementGroupName": { "Fn::If": [ "ClusterPlacementGroupDefined", { "Ref": "ClusterPlacementGroup" }, { "Ref" : "AWS::NoValue" } ] },
+				"KeyName": { "Fn::If": [ "KeyNameDefined", { "Ref": "KeyName" }, { "Ref" : "AWS::NoValue" } ] },
+				"NetworkInterfaces": [
+					{ "AssociatePublicIpAddress": "true", "DeviceIndex": 0, "SubnetId": { "Ref" : "ClusterSubnetID" }, "GroupSet": [ { "Ref": "ClusterSecurityGroupID" } ] }
+				],
+				"BlockDeviceMappings": [
+					{ "DeviceName" : "/dev/sda1", "Ebs" : { "VolumeType" : "gp2" } },
+					{ "DeviceName" : "xvdf", "Ebs" : { "SnapshotId": { "Ref": "SnapshotID" }, "VolumeSize": 100, "VolumeType" : "gp2", "DeleteOnTermination": true } }
+				],
+				"UserData": {
+					"Fn::Base64": { 
+						"Fn::Join": [ "", [
+							"<script>\n",
+							"cfn-init.exe -v -c config -s ", {"Ref": "AWS::StackId"}, " -r HeadNode ", " --region ", {"Ref": "AWS::Region"}, "\n",
+							"</script>"
+						] ]
+					}
+				}
+			}
+		},
+
+		"ComputeNode": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
+			"Metadata": {
+				"AWS::CloudFormation::Authentication": {
+					"rolebased" : {
+						"type": "S3",
+						"buckets": [ "<BUCKETNAME>" ],
+						"roleName": { "Ref": "S3AccessRole" }
+					}
+				},
+				"AWS::CloudFormation::Init": {
+					"configSets": {
+						"config": [
+							"1-setup",
+							"2-run"
+						]
+					},
+					"1-setup": {
+						"files": {
+							"C:\\cfn\\cfn-hup.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-hup.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+							"C:\\cfn\\hooks.d\\cfn-auto-reloader.conf" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/cfn-auto-reloader.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"ResourceName" : "HeadNode",
+									"StackId": { "Ref" : "AWS::StackId" },
+									"Region" : { "Ref" : "AWS::Region" }
+								}
+							},
+			                "C:\\cfn\\install\\hpc-user-info.conf": {
+								"source": "<SUBSTACKSOURCE>cfn-init/hpc-user-info.conf",
+								"authentication" : "rolebased",
+								"context" : {
+									"DomainDNSName" : { "Ref" : "DomainDNSName" },
+									"DomainNetBIOSName": { "Ref" : "DomainNetBIOSName" },
+									"HPCUserName" : { "Ref" : "HPCUserName" },
+									"HPCUserPassword": { "Ref" : "HPCUserPassword" }
+								}
+							},
+							"C:\\cfn\\install\\configure-network.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/configure-hpc-network.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\join-domain.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/join-domain.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\add-admin-user.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/add-admin-user.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\initialize-d-drive.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/initialize-d-drive.ps1",
+								"authentication" : "rolebased"
+							},
+							"C:\\cfn\\install\\install-process.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/install-process-compute.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\install-hpc-pack.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/install-hpc-pack-compute.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\post-install-hpc-pack.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/post-install-hpc-pack-compute.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\CleanupFiles.cmd" : {
+								"content": { 
+									"Fn::Join" : ["\n", [
+										"DEL c:\\cfn\\install\\hpc-user-info.conf"
+									] ]
+								}
+							}
+						},
+						"services" : {
+							"windows" : {
+								"cfn-hup" : {
+									"enabled" : "true",
+									"ensureRunning" : "true",
+									"files" : [ "c:\\cfn\\cfn-hup.conf", "c:\\cfn\\hooks.d\\cfn-auto-reloader.conf"]
+								}
+							}
+						}
+					},
+					"2-run": {
+						"commands": {
+							"01-join-domain": {
+								"command": "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\join-domain.ps1 -DomainFile c:\\cfn\\install\\hpc-user-info.conf",
+								"waitAfterCompletion": "forever"
+							},
+							"02-add-user": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\add-admin-user.ps1 -LogonName ", { "Ref": "DomainNetBIOSName" }, "/", { "Ref": "HPCUserName" } ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"03-initialize-d-drive": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\initialize-d-drive.ps1 -DomainNetBIOSName ", { "Ref": "DomainNetBIOSName" } ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"04-configure-network": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\configure-network.ps1 -DomainDNSName ", { "Ref": "DomainDNSName" }, " -InterfaceNewName Enterprise" ] ] },
+								"waitAfterCompletion": "5"
+							},
+							"05-setup-hpcpack": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\install-process.ps1 -UserFile c:\\cfn\\install\\hpc-user-info.conf -Stack ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref": "AWS::Region" } ] ] },
+								"waitAfterCompletion": "0"
+							},
+							"06-cleanup-files": {
+								"command": "C:\\cfn\\install\\CleanupFiles.cmd",
+								"waitAfterCompletion": "0"
+							},
+							"07-signal-success": {
+								"command": { "Fn::Join": ["", [ "cfn-signal.exe -e 0 \"", { "Fn::Base64" : { "Ref" : "ComputeNodeWaitHandle" } },"\"" ] ] },
+								"waitAfterCompletion": "0"
+							}
+						}
+					}
+				}
+			},
+			"Properties": {
+				"ImageId": { "Ref" : "AWSAmiId" },
+				"InstanceType": { "Ref": "ComputeNodeInstanceType" },
+				"IamInstanceProfile": { "Ref": "S3AccessProfile" },
+				"KeyName": { "Fn::If": [ "KeyNameDefined", { "Ref": "KeyName" }, { "Ref" : "AWS::NoValue" } ] },
+				"AssociatePublicIpAddress": "true",
+				"SecurityGroups": [ { "Ref": "ClusterSecurityGroupID" } ],
+				"BlockDeviceMappings": [
+					{ "DeviceName" : "/dev/sda1", "Ebs" : { "VolumeType" : "gp2" } },
+					{ "DeviceName" : "xvdf", "Ebs" : { "SnapshotId": { "Ref": "SnapshotID" }, "VolumeSize": 100, "VolumeType" : "gp2", "DeleteOnTermination": true } }
+				],
+				"UserData": {
+					"Fn::Base64": { 
+						"Fn::Join": [ "", [
+							"<script>\n",
+							"cfn-init.exe -v -c config -s ", {"Ref": "AWS::StackId"}, " -r ComputeNode ", " --region ", {"Ref": "AWS::Region"}, "\n",
+							"</script>"
+						] ]
+					}
+				}
+			}
+		},
+
+		"ScaleUp": {
+			"Type"      : "AWS::AutoScaling::ScalingPolicy",
+			"Properties": {
+				"AdjustmentType"      : "ChangeInCapacity",
+				"AutoScalingGroupName": { "Ref": "ComputeNodes" },
+				"Cooldown"            : "60",
+				"ScalingAdjustment"   : { "Ref": "ComputeNodeInstanceCountIncrease" }
+			}
+		},
+
+		"ComputeNodesScaleUp": {
+			"Type": "AWS::CloudWatch::Alarm",
+			"Properties": {
+				"AlarmDescription"  : "The current fleet has not enough capacity to handle the computation in less than the number of hours planned, we should scale up",
+				"Namespace"         : "HPC Cluster Metrics",
+				"MetricName"        : "Global Hours",
+				"Dimensions"        : [ { "Name": "StackId", "Value": { "Ref" : "AWS::StackName" } } ],
+				"Statistic"         : "Average",
+				"Period"            : "60",
+				"EvaluationPeriods" : "1",
+				"Threshold"         : { "Ref": "AlarmThreshold" },
+				"AlarmActions"      : [ { "Ref": "ScaleUp" } ],
+				"Unit"              : "Count",
+				"ComparisonOperator": "GreaterThanOrEqualToThreshold"
+			}
+		},
+
+		"ComputeNodes": {
+			"DependsOn": ["HeadNodeWaitCondition"],
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Properties": {
+				"LaunchConfigurationName": { "Ref": "ComputeNode" },
+				"VPCZoneIdentifier": [ { "Ref" : "ClusterSubnetID" } ],
+				"PlacementGroup": { "Fn::If": [ "ClusterPlacementGroupDefined", { "Ref": "ClusterPlacementGroup" }, { "Ref" : "AWS::NoValue" } ] },
+				"Tags"         : [
+					{ "Key" : "Name", "Value" : { "Fn::Join": [ "", [ { "Ref": "AWS::StackName" },  " - Compute Node" ] ] }, "PropagateAtLaunch": "true" }
+				],
+				"MinSize": { "Ref": "ComputeNodeInstanceMinCount" },
+				"MaxSize": { "Ref": "ComputeNodeInstanceMaxCount" },
+				"DesiredCapacity": { "Ref": "ComputeNodeInstanceCount" },
+				"HealthCheckType": "EC2",
+				"HealthCheckGracePeriod": "300",
+				"Cooldown": "300"
+			}
+		}
+	}
+}

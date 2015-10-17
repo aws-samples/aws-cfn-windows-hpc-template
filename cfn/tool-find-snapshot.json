@@ -1,0 +1,80 @@
+{
+	"AWSTemplateFormatVersion" : "2010-09-09",
+	"Description": "This AWS CloudFormation template searches for a snapshot by name. **WARNING** This template creates one AWS Lambda function and calls it. You will be billed for the AWS resources used if you create a stack from this template.",
+	"Parameters": {
+		"SnapshotName" : {
+			"Description": "'Name' tag of the snapshot to find",
+			"Type"       : "String",
+			"MinLength"  : "1"
+		}
+	},
+	"Resources" : {
+		"FindSnapshotRole": {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Version": "2012-10-17",
+					"Statement": [
+						{
+							"Sid": "",
+							"Effect": "Allow",
+							"Principal": {
+								"Service": "lambda.amazonaws.com"
+							},
+							"Action": "sts:AssumeRole"
+						}
+					]
+				},
+				"Path": "/",
+				"Policies": [
+					{
+						"PolicyName": "root",
+						"PolicyDocument": {
+							"Version": "2012-10-17",
+							"Statement": [
+								{
+									"Effect": "Allow",
+									"Action": [
+										"logs:CreateLogGroup",
+										"logs:CreateLogStream",
+										"logs:PutLogEvents",
+										"ec2:DescribeSnapshots"
+									],
+									"Resource": "*"
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+		"FindSnapshotFunction": {
+			"Type" : "AWS::Lambda::Function",
+			"Properties" : {
+				"Code" : {
+					"S3Bucket" : "<BUCKETNAME>",
+					"S3Key" : "<PREFIX>lambda/find-snapshot.zip"
+				},
+				"Description" : "AWS Lambda function for searching snapshot based on name",
+				"Handler" : "find-snapshot.handler",
+				"MemorySize" : "128",
+				"Role" : { "Fn::GetAtt" : [ "FindSnapshotRole", "Arn" ] },
+				"Runtime" : "nodejs",
+				"Timeout" : "25"
+			}
+		},
+		"FindSnapshot" : {
+			"Type" : "Custom::FindSnapshot",
+			"Properties" : {
+				"ServiceToken": { "Fn::GetAtt" : [ "FindSnapshotFunction", "Arn" ] },
+				"SnapshotName": { "Ref": "SnapshotName" }
+			}
+	    }
+	},
+	"Outputs": {
+		"SnapshotId": {
+			"Description": "Identified of the specified snapshot",
+			"Value" : { "Fn::GetAtt" : [ "FindSnapshot", "SnapshotId" ] }
+		}
+	}
+}

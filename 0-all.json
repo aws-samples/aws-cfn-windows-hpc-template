@@ -1,0 +1,148 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "This CloudFormation Template deploys a complete Microsoft HPC Pack environment. **WARNING** This template creates Amazon EC2 instances, AWS Lambda Functions, and other resources. You will be billed for the AWS resources used if you create a stack from this template.",
+	"Parameters": {
+		"SnapshotName" : {
+			"Description": "'Name' tag of the snapshot containing the Microsoft HPC Pack installation package",
+			"Type"       : "String",
+			"MinLength"  : "1",
+			"Default"    : "HPC Pack 2012 Installation"
+		},
+		"RDPLocation" : {
+			"Description"          : "Lockdown RDP access to the bastion host (default can be accessed from anywhere)",
+			"Type"                 : "String",
+			"Default"              : "0.0.0.0/0",
+			"AllowedPattern"       : "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+			"ConstraintDescription": "must be a valid CIDR range of the form x.x.x.x/x."
+		},
+		"VPCCIDR" : {
+			"Description" : "CIDR Block for the entire VPC",
+			"Type"        : "String",
+			"Default"     : "10.0.0.0/16",
+			"AllowedPattern" : "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+			"ConstraintDescription" : "must be a valid CIDR range of the form x.x.x.x/x."
+		},
+		"BastionAdminPassword" : {
+			"Description"   : "Password for the Administrator account of the Bastion host. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"HPCUserPassword" : {
+			"Description"   : "Password for the HPC User account. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"AdministratorPassword" : {
+			"Description"   : "Password for the Domain Administrator account. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"RestoreModePassword" : {
+			"Description"   : "Password for a separate Administrator account when the domain controller is in Restore Mode. Must be at least 8 characters containing letters, numbers and symbols",
+			"Type"          : "String",
+			"MinLength"     : "8",
+			"MaxLength"     : "32",
+			"AllowedPattern": "(?=^.{6,255}$)((?=.*\\d)(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[^A-Za-z0-9])(?=.*[a-z])|(?=.*[^A-Za-z0-9])(?=.*[A-Z])(?=.*[a-z])|(?=.*\\d)(?=.*[A-Z])(?=.*[^A-Za-z0-9]))^.*",
+			"NoEcho"        : "True"
+		},
+		"HeadNodeInstanceType" : {
+			"Description": "Instance type to use for the Head Node Instance",
+			"Type"       : "String",
+			"Default"    : "m4.2xlarge"
+		},
+		"ComputeNodeInstanceType" : {
+			"Description" : "Instance type to use for the Compute Node Instance",
+			"Type"        : "String",
+			"Default"     : "c3.8xlarge"
+		},
+		"ClusterPlacementGroup" : {
+			"Description": "Name of an existing placement group for the cluster nodes (no placement group if empty)",
+			"Type"       : "String",
+			"Default"    : ""
+		},
+		"ComputeNodeInstanceCount" : {
+			"Description": "Number of compute nodes to start initially",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "2"
+		},
+		"ComputeNodeInstanceMaxCount" : {
+			"Description": "Maximum number of compute nodes to start",
+			"Type"       : "Number",
+			"MinValue"   : "1",
+			"Default"    : "50"
+		}
+	},
+	"Resources": {
+		"Image": {
+			"Type"      : "AWS::CloudFormation::Stack",
+			"Properties": {
+				"TemplateURL": "<SUBSTACKSOURCE>cfn/tool-find-image.json",
+				"Parameters" : {
+					"AMIName": "Windows_Server-2012-R2_RTM-English-64Bit-Base"
+				}
+			}
+		},
+
+		"Snapshot": {
+			"Type"      : "AWS::CloudFormation::Stack",
+			"Properties": {
+				"TemplateURL": "<SUBSTACKSOURCE>cfn/tool-find-snapshot.json",
+				"Parameters" : {
+					"SnapshotName": { "Ref": "SnapshotName" }
+				}
+			}
+		},
+
+		"Core": {
+			"DependsOn" : ["Snapshot"],
+			"Type"      : "AWS::CloudFormation::Stack",
+			"Properties": {
+				"TemplateURL": "<SUBSTACKSOURCE>cfn/1-core.json",
+				"Parameters" : {
+					"AWSAmiId": { "Fn::GetAtt": [ "Image", "Outputs.AMIId"] },
+					"AdministratorPassword": { "Ref": "AdministratorPassword" },
+					"RestoreModePassword": { "Ref": "RestoreModePassword" },
+					"BastionAdminPassword": { "Ref": "BastionAdminPassword" },
+					"HPCUserPassword": { "Ref": "HPCUserPassword" },
+					"RDPLocation": { "Ref": "RDPLocation" },
+					"VPCCIDR": { "Ref": "VPCCIDR" }
+				}
+			}
+		},
+
+		"Cluster": {
+			"Type"      : "AWS::CloudFormation::Stack",
+			"Properties": {
+				"TemplateURL": "<SUBSTACKSOURCE>cfn/2-cluster.json",
+				"Parameters" : {
+					"AWSAmiId": { "Fn::GetAtt": [ "Image", "Outputs.AMIId"] },
+					"SnapshotID": { "Fn::GetAtt": [ "Snapshot", "Outputs.SnapshotId"] },
+					"ClusterSubnetID": { "Fn::GetAtt": [ "Core", "Outputs.ClusterSubnetID"] },
+					"ClusterSecurityGroupID": { "Fn::GetAtt": [ "Core", "Outputs.ClusterSecurityGroupID"] },
+					"HPCUserPassword": { "Ref": "HPCUserPassword" },
+					"HeadNodeInstanceType": { "Ref": "HeadNodeInstanceType" },
+					"ComputeNodeInstanceType": { "Ref": "ComputeNodeInstanceType" },
+					"ClusterPlacementGroup": { "Ref": "ClusterPlacementGroup" },
+					"ComputeNodeInstanceCount": { "Ref": "ComputeNodeInstanceCount" },
+					"ComputeNodeInstanceMaxCount": { "Ref": "ComputeNodeInstanceMaxCount" }
+				}
+			}
+		}
+	},
+	"Outputs": {
+		"Bastion": {
+			"Description": "IP Address of the bastion host",
+			"Value"      : { "Fn::GetAtt": [ "Core", "Outputs.Bastion" ] }
+		}
+	}
+}
