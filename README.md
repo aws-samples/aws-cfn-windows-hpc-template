@@ -3,6 +3,21 @@ This sample AWS CloudFormation template will launch a Windows-based HPC cluster 
 
 This document presents the steps required to deploy and get the platform running.
 
+## What does it do, how does it work, why should I use it?
+
+This platform has been published as a companion to the "(CMP306) Dynamic, On-Demand Windows HPC Clusters On AWS" session at AWS re:Invent 2015.
+
+This session is available on:
+
+* [YouTube](https://www.youtube.com/watch?v=-LXUj4-cHxI)
+* [SlideShare](http://www.slideshare.net/AmazonWebServices/cmp306-dynamic-ondemand-windows-hpc-clusters-on-aws)
+
+Interesting tricks:
+
+* [cfn-init/configure-hpc-network.ps1](cfn-init/configure-hpc-network.ps1) does the configuration for Jumbo Frames and interrupt moderation
+* [cfn-init/post-install-hpc-pack-compute.ps1](cfn-init/post-install-hpc-pack-compute.ps1) manages physical core affinity for the compute nodes
+* [cfn-init/compute-metrics.ps1](cfn-init/compute-metrics.ps1) queries the Microsoft HPC Pack APIs and publishes Amazon CloudWatch metrics based on the queue depth
+
 ## Prepare an Amazon EBS Snapshot for installation material
 
 ### Create the volume
@@ -81,6 +96,8 @@ Make sure you have an AWS CLI (https://aws.amazon.com/cli/) configured for Unix 
 
 The script will give you the URL of the global AWS CloudFormation template to use for creating a full platform.
 
+**WARNING: MAKE SURE YOUR BUCKET IS IN THE REGION WHERE YOUR CLUSTER WILL RUN, THIS S A REQUIREMENT FROM CLOUDFORMATION AND LAMBDA**
+
 ## Runing the template
 
 In AWS CloudFormation, use the URL provided as an output of the publication script to start a new stack.
@@ -122,17 +139,18 @@ Once on the bastion host, run `MSTSC.EXE` (Microsoft Remote Desktop Connection) 
 
 On the head node, you can interact with the Microsoft HPC Cluster Manager, or use `mpiexec` or PowerShell to start using the cluster..
 
-## What does it do, how does it work, why should I use it?
+## FAQ
 
-This platform has been published as a companion to the (CMP306) Dynamic, On-Demand Windows HPC Clusters On AWS session at AWS re:Invent 2015.
+### My Lambda functions fail, why?
 
-This session is available on:
+When starting your template, sometimes the AWS Lambda Functions fill fail and mark the entire stack as failed.
 
-* [YouTube](https://www.youtube.com/watch?v=-LXUj4-cHxI)
-* [SlideShare](http://www.slideshare.net/AmazonWebServices/cmp306-dynamic-ondemand-windows-hpc-clusters-on-aws)
+Look at the AWS CloudWatch Logs Log Group that is named in the error. You may find the following error in the content: 
 
-Interesting tricks:
+```
+Error occured while getting the object from S3. S3 Error Code: PermanentRedirect. 
+S3 Error Message: The bucket you are attempting to access must be addressed using 
+the specified endpoint. Please send all future requests to this endpoint.
+```
 
-* [cfn-init/configure-hpc-network.ps1](cfn-init/configure-hpc-network.ps1) does the configuration for Jumbo Frames and interrupt moderation
-* [cfn-init/post-install-hpc-pack-compute.ps1](cfn-init/post-install-hpc-pack-compute.ps1) manages physical core affinity for the compute nodes
-* [cfn-init/compute-metrics.ps1](cfn-init/compute-metrics.ps1) queries the Microsoft HPC Pack APIs and publishes Amazon CloudWatch metrics based on the queue depth
+If this is the case, make sure that the region in which your Amazon S3 bucket resides is the same than the one where you are running your cluster.
