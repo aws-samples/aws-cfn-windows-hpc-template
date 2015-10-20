@@ -96,7 +96,7 @@ Make sure you have an AWS CLI (https://aws.amazon.com/cli/) configured for Unix 
 
 The script will give you the URL of the global AWS CloudFormation template to use for creating a full platform.
 
-**WARNING: MAKE SURE YOUR BUCKET IS IN THE REGION WHERE YOUR CLUSTER WILL RUN, THIS S A REQUIREMENT FROM CLOUDFORMATION AND LAMBDA**
+**WARNING: MAKE SURE YOUR BUCKET IS IN THE REGION WHERE YOUR CLUSTER WILL RUN, THIS IS A REQUIREMENT FROM AWS LAMBDA WHEN USED IN AWS CLOUDFORMATION**
 
 ## Runing the template
 
