@@ -32,10 +32,10 @@ Import-Module ServerManager
 
 Write-Host "Renaming network adapter"
 $adapterName = (Get-NetAdapter | Select -ExpandProperty Name -First 1)
-Rename-NetAdapter -Name $adapterName -NewName $InterfaceName
+Rename-NetAdapter -Name $adapterName -NewName $InterfaceNewName
 
 Write-Host "Disabling IPv6"
-Disable-NetAdapterBinding  -InterfaceAlias $InterfaceName -ComponentID ms_tcpip6 -Confirm:$false
+Disable-NetAdapterBinding  -InterfaceAlias $InterfaceNewName -ComponentID ms_tcpip6 -Confirm:$false
 
 Write-Host "Changing DNS Client"
 Set-DnsClient -InterfaceAlias "Public" -ConnectionSpecificSuffix $DomainDNSName -UseSuffixWhenRegistering:$false -RegisterThisConnectionsAddress:$false -Confirm:$false
