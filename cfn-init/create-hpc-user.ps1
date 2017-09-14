@@ -28,13 +28,17 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory=$True,Position=1)]
-  [string]$UserFile
+  [string]$UserFile,
+  [int]$MaxComputersPerUser=100
 )
 
 if (-not (Test-Path $UserFile))
 {
     Throw "File '$UserFile' does not exist, exiting script"
 }
+
+$domain = Get-ADDomain
+$domain | Set-ADDomain -Replace @{"ms-ds-MachineAccountQuota"="$MaxComputersPerUser"}
 
 Import-Module ServerManager
 Install-WindowsFeature RSAT-ADDS
@@ -44,7 +48,6 @@ $PassPS = ConvertTo-SecureString $content[1] -AsPlainText -Force
 $logonName = $content[4]
 New-ADUser -Name $logonName -AccountPassword $PassPS -PasswordNeverExpires:$false -ChangePasswordAtLogon:$false -Enabled:$true
 
-$domain = Get-ADDomain
 $domainName = $domain.ComputersContainer
 dsacls $domainName /I:S /G "$($UserPS):CC;;computer"
 dsacls $domainName /I:S /G "$($UserPS):DC;;computer"
