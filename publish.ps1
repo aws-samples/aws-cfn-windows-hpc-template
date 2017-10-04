@@ -54,6 +54,7 @@ Write-Host ""
 Write-Host "Publishing AWS Lambda function sources"
 
 Add-Type -assembly "System.IO.Compression"
+Add-Type -assembly "System.IO.Compression.filesystem"
 
 Get-ChildItem "lambda" -Filter *.js | Foreach-Object {
   $FullName = $_.FullName
