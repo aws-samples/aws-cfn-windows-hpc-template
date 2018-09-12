@@ -83,8 +83,8 @@
 		"AWSAmiId" : {
 			"Description"          : "Identifier of the Amazon Machine Image to use for the platforms (all machines are started using the same AMI). We use Microsoft Windows Server 2012 R2 Base 64bits.",
 			"Type"                 : "String",
-			"AllowedPattern"       : "ami-([0-9a-fA-F]{8})",
-			"ConstraintDescription": "must be a valid Amazon Machine Image (ami-xxxxxxxx)."
+			"AllowedPattern"       : "((ami-([0-9a-fA-F]{8}))|(ami-([0-9a-fA-F]{17})))",
+			"ConstraintDescription": "must be a valid Amazon Machine Image (ami-xxxxxxxxxxxxxxxxx or ami-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)."
 		},
 		"BastionInstanceType" : {
 			"Description": "Instance type to use for the Bastion Instance",
@@ -107,8 +107,8 @@
 			"Properties": {
 				"AssumeRolePolicyDocument": {
 					"Version" : "2012-10-17",
-					"Statement": [ 
-						{ 
+					"Statement": [
+						{
 							"Effect": "Allow",
 							"Principal": { "Service": [ "ec2.amazonaws.com" ] },
 							"Action": [ "sts:AssumeRole" ]
@@ -384,7 +384,7 @@
 								"authentication" : "rolebased"
 			                },
 							"C:\\cfn\\install\\CleanupFiles.cmd" : {
-								"content": { 
+								"content": {
 									"Fn::Join" : ["\n", [
 										"DEL c:\\cfn\\install\\local-admin-password.conf"
 									] ]
@@ -442,7 +442,7 @@
 					{ "AssociatePublicIpAddress": "true", "DeviceIndex": 0, "SubnetId": { "Ref" : "PublicSubnet" }, "GroupSet": [ { "Ref": "BastionSecurityGroup" } ] }
 				],
 				"UserData": {
-					"Fn::Base64": { 
+					"Fn::Base64": {
 						"Fn::Join": [ "", [
 							"<script>\n",
 							"cfn-init.exe -v -c config -s ", {"Ref": "AWS::StackId"}, " -r Bastion ", " --region ", {"Ref": "AWS::Region"}, "\n",
@@ -541,7 +541,7 @@
 								"authentication" : "rolebased"
 			                },
 							"C:\\cfn\\install\\CleanupFiles.cmd" : {
-								"content": { 
+								"content": {
 									"Fn::Join" : ["\n", [
 										"DEL c:\\cfn\\install\\hpc-user-info.conf",
 										"DEL c:\\cfn\\install\\local-admin-password.conf",
@@ -613,7 +613,7 @@
 					{ "DeviceName" : "/dev/sda1", "Ebs" : { "VolumeType" : "gp2" } }
 				],
 				"UserData": {
-					"Fn::Base64": { 
+					"Fn::Base64": {
 						"Fn::Join": [ "", [
 							"<script>\n",
 							"cfn-init.exe -v -c config -s ", {"Ref": "AWS::StackId"}, " -r DomainController ", " --region ", {"Ref": "AWS::Region"}, "\n",
@@ -639,7 +639,7 @@
 			}
 		},
 
-		"VPCDHCPOptionsAssoc": { 
+		"VPCDHCPOptionsAssoc": {
 			"DependsOn" : ["DomainControllerWaitCondition"],
 			"Type" : "AWS::EC2::VPCDHCPOptionsAssociation",
 			"Properties" : {
