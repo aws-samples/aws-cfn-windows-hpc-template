@@ -59,7 +59,7 @@
 				"Handler" : "find-image.handler",
 				"MemorySize" : "128",
 				"Role" : { "Fn::GetAtt" : [ "FindImageRole", "Arn" ] },
-				"Runtime" : "nodejs4.3",
+				"Runtime" : "nodejs8.10",
 				"Timeout" : "25"
 			}
 		},
