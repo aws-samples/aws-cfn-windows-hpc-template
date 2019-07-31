@@ -72,10 +72,11 @@ if (Test-Path "D:\AWSPVDriverSetup\AWSPVDriverSetup.msi")
   & msiexec.exe /log "D:\AWSPVDriverSetup\install.log" /i "D:\AWSPVDriverSetup\AWSPVDriverSetup.msi" /quiet > "D:\AWSPVDriverSetup\setup.log" 2>&1
 }
 
-Write-Host "Activating Jumbo Frames and deactivating Interrupt Moderation"
-netsh int ip set subinterface "$InterfaceNewName" mtu=9001 store=persistent
-Set-NetAdapterAdvancedProperty -Name $InterfaceNewName -RegistryKeyword "*JumboPacket" -RegistryValue 9014
-Set-NetAdapterAdvancedProperty -Name $InterfaceNewName -RegistryKeyword "*InterruptModeration" -RegistryValue 0
+# Error occured
+# Write-Host "Activating Jumbo Frames and deactivating Interrupt Moderation"
+# netsh int ip set subinterface "$InterfaceNewName" mtu=9001 store=persistent
+# Set-NetAdapterAdvancedProperty -Name $InterfaceNewName -RegistryKeyword "*JumboPacket" -RegistryValue 9014
+# Set-NetAdapterAdvancedProperty -Name $InterfaceNewName -RegistryKeyword "*InterruptModeration" -RegistryValue 0
 
 Write-Host "Deactivating Windows Update"
 $AUSettings = (New-Object -com "Microsoft.Update.AutoUpdate").Settings

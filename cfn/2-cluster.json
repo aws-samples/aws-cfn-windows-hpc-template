@@ -58,7 +58,7 @@
 		"AWSAmiId" : {
 			"Description"          : "Identifier of the Amazon Machine Image to use for the platforms (all machines are started using the same AMI). We use Microsoft Windows Server 2012 R2 Base 64bits.",
 			"Type"                 : "String",
-			"AllowedPattern"       : "ami-([0-9a-fA-F]{8})",
+			"AllowedPattern"       : "ami-([0-9a-fA-F]+)",
 			"ConstraintDescription": "must be a valid Amazon Machine Image (ami-xxxxxxxx)."
 		},
 		"HeadNodeInstanceType" : {
@@ -294,8 +294,12 @@
 								"source": "<SUBSTACKSOURCE>cfn-init/initialize-d-drive.ps1",
 								"authentication" : "rolebased"
 							},
-							"C:\\cfn\\install\\install-process.ps1" : {
-								"source": "<SUBSTACKSOURCE>cfn-init/install-process-head.ps1",
+							"C:\\cfn\\install\\install-process-1.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/install-process-head-1.ps1",
+								"authentication" : "rolebased"
+			                },
+							"C:\\cfn\\install\\install-process-2.ps1" : {
+								"source": "<SUBSTACKSOURCE>cfn-init/install-process-head-2.ps1",
 								"authentication" : "rolebased"
 			                },
 							"C:\\cfn\\install\\install-hpc-pack.ps1" : {
@@ -351,14 +355,18 @@
 								"waitAfterCompletion": "5"
 							},
 							"06-setup-hpcpack": {
-								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\install-process.ps1 -UserFile c:\\cfn\\install\\hpc-user-info.conf -Stack ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref": "AWS::Region" } ] ] },
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\install-process-1.ps1 -UserFile c:\\cfn\\install\\hpc-user-info.conf -Stack ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref": "AWS::Region" } ] ] },
+								"waitAfterCompletion": "forever"
+							},
+							"07-setup-hpcpack": {
+								"command": { "Fn::Join" : ["", [ "powershell.exe -ExecutionPolicy Unrestricted C:\\cfn\\install\\install-process-2.ps1 -UserFile c:\\cfn\\install\\hpc-user-info.conf -Stack ", { "Ref": "AWS::StackName" }, " -Region ", { "Ref": "AWS::Region" } ] ] },
 								"waitAfterCompletion": "0"
 							},
-							"07-cleanup-files": {
+							"08-cleanup-files": {
 								"command": "C:\\cfn\\install\\CleanupFiles.cmd",
 								"waitAfterCompletion": "0"
 							},
-							"08-signal-success": {
+							"09-signal-success": {
 								"command": { "Fn::Join" : ["", [ "cfn-signal.exe -e 0 \"", { "Fn::Base64" : { "Ref" : "HeadNodeWaitHandle" } }, "\"" ] ] },
 								"waitAfterCompletion": "0"
 							}
