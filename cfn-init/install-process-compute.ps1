@@ -63,6 +63,8 @@ schtasks.exe /Delete /F /TN InstallHPCPack
 Write-Host "Registering Post-Installation Scheduled Task"
 schtasks.exe /Create /SC ONSTART /RU "$UserPS" /RP "$PassPS" /TN PostInstallHPCPack /TR "powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\post-install-hpc-pack.ps1 >> C:\cfn\log\hpc-install.log 2>&1"
 
+Start-Sleep 300
+
 Write-Host "Running Post-Installation Scheduled Task"
 schtasks.exe /Run /I /TN PostInstallHPCPack
 
