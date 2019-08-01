@@ -36,7 +36,7 @@ $tasks = ($jobs | Get-HpcTask -State Running, Queued -ErrorAction SilentlyContin
 $nodes = (Get-HpcNode -GroupName ComputeNodes -State Online)
 
 $jobCount = $jobs.Count
-$taskCount = $task.Count
+$taskCount = $tasks.Count
 $coreHours = ($tasks | % { $_.Runtime.TotalHours * $_.MinCores } | Measure-Object -Sum | Select-Object -ExpandProperty Sum)
 $nodeCount = $nodes.Count
 $coresPerMachine = ($nodes | Measure-Object -Property SubscribedCores -Average | Select-Object -ExpandProperty Average)
