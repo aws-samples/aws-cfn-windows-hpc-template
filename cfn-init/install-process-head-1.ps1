@@ -47,6 +47,10 @@ schtasks.exe /Create /SC ONSTART /RU "$UserPS" /RP "$PassPS" /TN InstallHPCPack 
 Write-Host "Running Installation Scheduled Task"
 schtasks.exe /Run /I /TN InstallHPCPack
 
+#
+# above part will reboot the OS and below lines will not execute
+#
+
 Write-Host "Waiting for Installation"
 $status = (Get-Service -Name HpcManagement -ErrorAction SilentlyContinue | Select -ExpandProperty Status)
 while ($status -ne "Running")
