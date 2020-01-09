@@ -59,7 +59,7 @@
 				"Handler" : "find-snapshot.handler",
 				"MemorySize" : "128",
 				"Role" : { "Fn::GetAtt" : [ "FindSnapshotRole", "Arn" ] },
-				"Runtime" : "nodejs4.3",
+				"Runtime" : "nodejs10.x",
 				"Timeout" : "25"
 			}
 		},
