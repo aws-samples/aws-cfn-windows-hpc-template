@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Job Version="3.000" Id="4" State="Configuring" CreateTime="11/3/2021 3:37:30 PM" Name="Parametric-Job-Prod" IsExclusive="false" RunUntilCanceled="false" UnitType="Core" Owner="HPCLAB\admin" UserName="" Project="" JobType="Batch" JobTemplate="Default" Priority="Normal" OrderBy="" RequeueCount="0" AutoRequeueCount="0" PendingReason="None" AutoCalculateMax="true" AutoCalculateMin="true" FailOnTaskFailure="false" Progress="0" ProgressMessage="" MinCores="1" MaxCores="1" NotifyOnStart="false" NotifyOnCompletion="false" SingleNode="false" JobValidExitCodes="0" ParentJobIds="" EstimatedProcessMemory="0" TaskExecutionFailureRetryLimit="0" xmlns="http://schemas.microsoft.com/HPCS2008R2/scheduler/">
+    <Dependencies>
+        <Parent GroupId="17">
+            <Child GroupId="16" />
+        </Parent>
+        <Parent GroupId="16">
+            <Child GroupId="18" />
+        </Parent>
+        <Parent GroupId="18">
+            <Child GroupId="19" />
+        </Parent>
+    </Dependencies>
+    <Tasks>
+        <Task Version="3.000" Id="19" ParentJobId="4" State="Configuring" UnitType="Core" NiceId="3" CommandLine="powershell.exe -noexit &quot;&amp; 'C:/cfn/install/run-simulation-prod.ps1'&quot; -case *" RequeueCount="0" PendingReason="None" StartValue="1" EndValue="4" IncrementValue="1" GroupId="18" CreateTime="11/3/2021 3:37:30 PM" Name="My Sweep Task - Run Simulations" MinCores="1" MaxCores="2" AutoRequeueCount="0" Type="ParametricSweep" FailJobOnFailure="false" IsParametric="true" />
+        <Task Version="3.000" Id="20" ParentJobId="4" State="Configuring" UnitType="Core" NiceId="1" CommandLine="powershell -Command &quot;&amp; {Update-ASAutoScalingGroup -AutoScalingGroupName  ((Get-CFNStack -StackName (Get-EC2Tag | ` Where-Object {$_.ResourceId -eq (New-Object System.Net.WebClient).DownloadString('http://169.254.169.254/latest/meta-data/instance-id') -and $_.Key -eq 'aws:cloudformation:stack-name'} | Select-Object -ExpandProperty Value)).Outputs | where {$_.OutputKey -eq 'AutoScalingGroupName'}).OutputValue -MaxSize 2 -MinSize 0 -DesiredCapacity 2}&quot;" RequeueCount="0" PendingReason="None" StartValue="0" EndValue="0" IncrementValue="1" GroupId="17" CreateTime="11/3/2021 3:37:30 PM" Name="Task - Set ASG from 1 to 2 worker nodes" MinCores="1" MaxCores="1" AutoRequeueCount="0" Type="Basic" FailJobOnFailure="false" />
+        <Task Version="3.000" Id="21" ParentJobId="4" State="Configuring" UnitType="Core" NiceId="4" CommandLine="powershell -Command &quot;&amp; {Update-ASAutoScalingGroup -AutoScalingGroupName  ((Get-CFNStack -StackName (Get-EC2Tag | ` Where-Object {$_.ResourceId -eq (New-Object System.Net.WebClient).DownloadString('http://169.254.169.254/latest/meta-data/instance-id') -and $_.Key -eq 'aws:cloudformation:stack-name'} | Select-Object -ExpandProperty Value)).Outputs | where {$_.OutputKey -eq 'AutoScalingGroupName'}).OutputValue -MaxSize 1 -MinSize 1 -DesiredCapacity 1}&quot;" RequeueCount="0" PendingReason="None" StartValue="0" EndValue="0" IncrementValue="1" GroupId="19" CreateTime="11/3/2021 3:37:30 PM" Name="Task - Remove worker nodes by setting ASG desired nodes to 1" MinCores="1" MaxCores="1" AutoRequeueCount="0" Type="Basic" FailJobOnFailure="false" />
+        <Task Version="3.000" Id="22" ParentJobId="4" State="Configuring" UnitType="Core" NiceId="2" CommandLine="powershell.exe -noexit &quot;&amp; 'C:/cfn/install/WaitForScaling.ps1'&quot;" RequeueCount="0" PendingReason="None" StartValue="0" EndValue="0" IncrementValue="1" GroupId="16" CreateTime="11/3/2021 3:43:00 PM" Name="Wait for Scaling" MinCores="1" MaxCores="1" AutoRequeueCount="0" Type="Basic" FailJobOnFailure="false" />
+    </Tasks>
+</Job>

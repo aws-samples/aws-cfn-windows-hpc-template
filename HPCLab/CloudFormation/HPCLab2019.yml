@@ -1,0 +1,715 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  SPDX-License-Identifier: MIT-0
+  
+  This template would create HPC Windows Cluster under your aws account with relevant resources in the current region,
+  cluster including one head node and one compute node. You would RDP to head-node with DomainNetBIOSName\admin and password to
+  get access on the HPC Cluster.
+
+  **WARNING** This template creates EC2 instances, NAT Gateways, Managed Active Directory and related resources. 
+  You will be billed for the AWS resources used if you create a stack from this template.
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Deploy Parameters
+        Parameters:
+          - S3BucketName
+          - S3Region
+          - AMIId
+      - Label:
+          default: RDP Parameters
+        Parameters:
+          - RDPLocation
+      - Label:
+          default: AWS managed Microsoft AD Parameters
+        Parameters:
+          - DomainDNSName
+          - DomainNetBIOSName
+      - Label:
+          default: Cluster Parameters
+        Parameters: 
+          - ComputeNodeInstanceCount
+          - ComputeNodeInstanceType 
+          - S3OutputBucketName
+      - Label:
+          default: Notification Parameters
+        Parameters: 
+          - ScalingNotificationEmail
+    ParameterLabels: 
+      DomainDNSName:
+        default: Domain DNS Name
+      DomainNetBIOSName:
+        default: Domain Net BIOS Name
+      RDPLocation:
+        default: Remote Desktop Location
+      S3BucketName:
+        default: Installation Bucket Name
+      S3Region:
+        default: Installation Bucket Region
+      AMIId:
+        default: AMI ID
+      ComputeNodeInstanceType:
+        default: Compute Node Instance Type
+      ComputeNodeInstanceCount:
+        default: Compute Node Instance Count
+      ScalingNotificationEmail:
+        default: Scaling Notification Email Address
+      S3OutputBucketName:
+        default: Output Bucket Name
+Parameters: 
+  DomainDNSName:
+    Description:  Fully qualified domain name (FQDN) of the forest root domain e.g. hpclab.local.
+    Default: hpclab.local
+    Type: String
+    AllowedPattern: '[a-zA-Z0-9]+\..*'
+  DomainNetBIOSName:
+    Description: NetBIOS name of the domain (upto 15 characters) for users of earlier versions of Windows e.g. hpclab
+    Type: String
+    MinLength: '1'
+    MaxLength: '15'
+    Default: HPCLAB
+    AllowedPattern: '[a-zA-Z0-9]+'
+  RDPLocation:
+    Description: >-
+      RDP access to the head node, if you are using VPN connection and want to set it as your own IP, please verify it within AWS
+      Security Group 'My IP' option in targeted region. Quick tip - one IP only is /32. must be a valid CIDR range of the form x.x.x.x/x
+      Setting as 0.0.0.0/0 is not suggested for long-term usage.
+    Type: String
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: must be a valid CIDR range of the form x.x.x.x/x.
+  S3BucketName:
+    Description: The S3 bucket name of the installation materials, the input should not contain prefix
+    Type: String
+  S3Region:
+    Description: >-
+      The S3 bucket region where the installation artifacts stored. Must be string as one of us-east-1, us-east-2, us-west-1
+      and us-west-2
+    Type: String
+    AllowedValues:
+      - us-east-1
+      - us-east-2 
+      - us-west-1 
+      - us-west-2
+    ConstraintDescription: Must be string as one of us-east-1, us-east-2, us-west-1 and us-west-2.
+  S3OutputBucketName:
+    Description: The S3 bucket name of the installation materials, the input should not contain prefix
+    Type: String
+  AMIId:
+    Description: >-
+      The Id of Amazon Machine Image to use for the platforms (all machines are started using the same AMI). Please use Microsoft
+      Windows Server 2016 Base, Datacenter edition in the current CloudFormation region. Leverages Parameter Store to retrieve Image ID
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id> 
+    Default: /aws/service/ami-windows-latest/Windows_Server-2016-English-Full-Base
+  ComputeNodeInstanceCount:
+    Description: Number of instances for the compute node, minimum 1, the number is limited by the service limit of your aws account
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+  ScalingNotificationEmail:
+    Description: Email address to which we'll send scaling notifications
+    Type: String 
+    AllowedPattern: ^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$
+    ConstraintDescription: Must be a valid email address
+  ComputeNodeInstanceType:
+    Type: String
+    Default: m5.xlarge
+    Description: Pick instance type.
+    AllowedValues: 
+      - m5.large
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - m5.8xlarge 
+      - m6i.large
+      - m6i.xlarge
+      - m6i.2xlarge
+      - m6i.4xlarge
+      - m6i.8xlarge  
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - VPC'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - InternetGateway'
+
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
+
+  NATGW1:
+    Type: AWS::EC2::NatGateway
+    Properties:
+        AllocationId: !GetAtt EIP1.AllocationId
+        SubnetId: !Ref PublicSubnet1
+
+  EIP1:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  NATGW2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+        AllocationId: !GetAtt EIP2.AllocationId
+        SubnetId: !Ref PublicSubnet2
+
+  EIP2:
+    DependsOn: AttachGateway
+    Type: AWS::EC2::EIP
+    Properties:
+        Domain: vpc
+
+  PublicRouteTable1:
+    Type: AWS::EC2::RouteTable 
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - PublicRouteTable1'
+
+  DefaultPublicRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteTable2:
+    Type: AWS::EC2::RouteTable 
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - PublicRouteTable2'
+
+  DefaultPublicRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: AttachGateway
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: 10.0.0.0/26
+      VpcId: !Ref VPC
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName} - Public Subnet1
+
+  PublicSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable1
+      SubnetId: !Ref PublicSubnet1
+
+  PrivateSubnetRouteTableAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      SubnetId: !Ref PrivateSubnet1
+
+  PrivateSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      SubnetId: !Ref PrivateSubnet2
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: 10.0.0.128/26
+      VpcId: !Ref VPC
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - Public Subnet2'
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 0
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: 10.0.2.0/24
+      VpcId: !Ref VPC
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - Private Subnet1'
+
+  PrivateRouteTable1:
+    Type: AWS::EC2::RouteTable 
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - PrivateRouteTable1'
+
+  DefaultPrivateRoute1:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGW1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select
+        - 1
+        - Fn::GetAZs: !Ref 'AWS::Region'
+      CidrBlock: 10.0.3.0/24
+      VpcId: !Ref VPC
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - Private Subnet2'
+
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable 
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - PrivateRouteTable2'
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NATGW2
+
+  PublicSubnetRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable2
+      SubnetId: !Ref PublicSubnet2
+
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      RouteTableIds:
+        - !Ref PublicRouteTable1
+        - !Ref PublicRouteTable2
+        - !Ref PrivateRouteTable1
+        - !Ref PrivateRouteTable2
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref VPC
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action: "s3:*"
+            Resource: "arn:aws:s3:::*"
+            Condition: 
+              StringEquals:
+                "s3:ResourceAccount": !Ref "AWS::AccountId" 
+
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for Windows HPC Cluster
+      SecurityGroupIngress:
+        - CidrIp: !Ref RDPLocation
+          FromPort: 3389
+          ToPort: 3389
+          IpProtocol: tcp
+          Description: Allow RDP to client host
+        - CidrIp: !Ref RDPLocation
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+          Description: Allow HTTPS to client host
+      SecurityGroupEgress:
+        - CidrIp: 0.0.0.0/0
+          IpProtocol: "-1"
+          FromPort: 0
+          ToPort: 65535
+          Description: Allow all outbound traffic
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - SecurityGroup'
+
+  ClusterSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress 
+    Properties:
+      Description: Allowing all communication between instances inside security group
+      GroupId: !GetAtt InstanceSecurityGroup.GroupId
+      IpProtocol: "-1"
+      FromPort: -1
+      SourceSecurityGroupId: !GetAtt InstanceSecurityGroup.GroupId
+       
+  MicrosoftAD:
+    Type: AWS::DirectoryService::MicrosoftAD
+    Properties:
+      Name: !Ref DomainDNSName
+      ShortName: !Ref DomainNetBIOSName
+      Password: !Sub '{{resolve:secretsmanager:${ClusterSecrets}:SecretString:HPCUserPassword}}'  
+      Edition: Standard
+      VpcSettings:
+        SubnetIds:
+          - !Ref PrivateSubnet1
+          - !Ref PrivateSubnet2
+        VpcId: !Ref VPC
+
+  ScalingSNSTopic:
+    Type: AWS::SNS::Topic
+    Properties: 
+      Subscription: 
+        - Endpoint: !Ref ScalingNotificationEmail
+          Protocol: "email"
+
+  HPCHeadNodeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns: 
+        - !Ref HPCHeadNodeManagedPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - HPC Head Node IAM Role'
+
+  HPCHeadNodeManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:ListBucket
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}
+              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}/* 
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: 
+              - !Ref ClusterSecrets
+              - !Ref CertPassword
+          - Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+            Resource: !Ref "AWS::StackId"
+          - Effect: Allow
+            Action:
+              - ec2:DescribeTags
+            Resource: "*" 
+
+  HPCInstanceManagedPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:       
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+              - s3:PutObject
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}
+              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}/*  
+              - !Sub arn:${AWS::Partition}:s3:::${S3OutputBucketName}
+              - !Sub arn:${AWS::Partition}:s3:::${S3OutputBucketName}/*  
+          - Effect: Allow
+            Action:
+              - autoscaling:SetDesiredCapacity
+              - autoscaling:UpdateAutoscalingGroup
+            Resource: '*'
+            Condition: {
+                "StringEquals": {
+                    "autoscaling:ResourceTag/aws:cloudformation:logical-id": "ComputeNodesWindows"
+                }
+            } 
+          - Effect: Allow
+            Action:
+              - ec2:DescribeTags
+            Resource: "*"  
+          - Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: 
+              - !Ref ClusterSecrets 
+              - !Ref CertPassword
+          - Effect: Allow
+            Action:
+              - cloudformation:DescribeStacks
+              - cloudformation:DescribeStackResource
+            Resource: !Ref "AWS::StackId"
+
+  HPCInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns: 
+        - !Ref HPCInstanceManagedPolicy
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - HPC IAM Role'
+
+  HPCInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref HPCInstanceRole
+
+  HPCHeadNodeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref HPCHeadNodeRole
+
+  ClusterSecrets:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Secrets for HPC Pack 2019
+      GenerateSecretString:
+        SecretStringTemplate: !Join
+          - ''
+          - - '{'
+            - !Sub '"HPCUserName": "${DomainNetBIOSName}\\admin",' 
+            - !Sub '"HPCBIOSName": "${DomainNetBIOSName}",'
+            - !Sub '"HPCDNSName": "${DomainDNSName}"'
+            - '}'
+        GenerateStringKey: "HPCUserPassword"
+        PasswordLength: 12
+        ExcludeCharacters: '"@/\''$`'
+
+  CertPassword: 
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Certificate Secret for HPC Pack 2019
+      GenerateSecretString: 
+        SecretStringTemplate: "{}"
+        GenerateStringKey: "certPassword"
+        PasswordLength: 12
+        ExcludeCharacters: '"@/\''$`'
+  
+  HeadNode:
+    Type: AWS::EC2::Instance 
+    Metadata:
+      'AWS::CloudFormation::Authentication':
+        rolebased:
+          type: S3
+          buckets:
+            - !Ref S3BucketName
+          roleName: !Ref HPCHeadNodeRole
+      'AWS::CloudFormation::Init':
+        configSets:
+          config:
+            - 1-setup
+            - 2-run
+        1-setup:
+          sources:
+            'C:\cfn\install': !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/ScriptsForHeadNode2019.zip'
+          files:
+            'C:\cfn\install\HPCPack.zip':
+              source: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/HPCPack.zip'
+              authentication: rolebased
+        2-run:
+          commands:
+            01-RenameComputer:
+              command: powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName head-node -Restart
+              waitAfterCompletion: forever
+            02-JoinDomain:
+              command: !Sub 
+                - powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\JoinDomain.ps1 ${ClusterSecrets} ${ADIps}
+                - ADIps: !Join [",", !GetAtt [MicrosoftAD, DnsIpAddresses]]
+              waitAfterCompletion: forever
+            03-AddUser:
+              command: !Sub powershell.exe powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\AddUser.ps1 ${ClusterSecrets}
+              waitAfterCompletion: '0'
+            04-PreInstall:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\PreInstall.ps1 ${ClusterSecrets}
+              waitAfterCompletion: '5'
+            05-SetupProcess:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\SetupProcessHead.ps1 ${ClusterSecrets}  ${CertPassword}>> C:\cfn\log\hpcsetup.log 2>&1
+              waitAfterCompletion: '0'
+            06-Success:
+              command: !Sub 'cfn-signal.exe -e %ERRORLEVEL% --stack ${AWS::StackName} --resource HeadNode --region ${AWS::Region}'
+              waitAfterCompletion: '0'
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT30M
+    Properties:
+      ImageId: !Ref AMIId
+      InstanceType: !Ref ComputeNodeInstanceType
+      IamInstanceProfile: !Ref HPCHeadNodeInstanceProfile 
+      Monitoring: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: 60
+            VolumeType: gp3 
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true
+          DeviceIndex: "0"
+          SubnetId: !Ref PublicSubnet2
+          GroupSet:
+            - Fn::GetAtt:
+              - InstanceSecurityGroup
+              - GroupId
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - Head-Node'
+      UserData: !Base64
+        'Fn::Sub':  '<script> cfn-init.exe -v -c config -s ${AWS::StackId} -r HeadNode --region ${AWS::Region} </script>'
+
+  ComputeNodeLaunchTemplateWindows:
+    Type: AWS::EC2::LaunchTemplate
+    DependsOn:
+      - HeadNode
+    Metadata:
+      'AWS::CloudFormation::Authentication':
+        rolebased:
+          type: S3
+          buckets:
+            - !Ref S3BucketName
+          roleName: !Ref HPCInstanceRole
+      'AWS::CloudFormation::Init':
+        configSets:
+          config:
+            - 1-setup
+            - 2-run
+        1-setup:
+          sources:
+            'C:\cfn\install': !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/ScriptsForComputeNode2019.zip'
+        2-run:
+          commands:
+            01-JoinDomain:
+              command: !Sub 
+                - powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\JoinDomain.ps1 ${ClusterSecrets} ${ADIps}
+                - ADIps: !Join [",", !GetAtt [MicrosoftAD, DnsIpAddresses]]
+            02-AddUser:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\AddUser.ps1 ${ClusterSecrets}
+              waitAfterCompletion: '0'
+            03-PreInstall:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\PreInstall.ps1 ${ClusterSecrets}
+              waitAfterCompletion: '5'
+            04-SetupProcess:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\SetupProcessCompute.ps1 ${ClusterSecrets} ${CertPassword}
+              waitAfterCompletion: '0'
+            05-InstallPackages:
+              command: powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\install-packages.ps1
+              waitAfterCompletion: '0'
+            05-Success:
+              command: !Sub 'cfn-signal.exe -e %ERRORLEVEL% --stack ${AWS::StackName} --resource ComputeNodesWindows --region ${AWS::Region}'
+    Properties:
+      LaunchTemplateData: 
+        ImageId: !Ref AMIId
+        InstanceType: !Ref ComputeNodeInstanceType
+        IamInstanceProfile:
+          Name: !Ref HPCInstanceProfile
+        Monitoring:
+          Enabled: true 
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 60
+              VolumeType: gp3
+        SecurityGroupIds:
+          - !GetAtt InstanceSecurityGroup.GroupId
+        EbsOptimized: true
+        UserData:
+          Fn::Base64: !Sub |
+            <script>
+              cfn-init.exe -v -c config -s ${AWS::StackName} -r ComputeNodeLaunchTemplateWindows --region ${AWS::Region} --role ${HPCInstanceRole} -v
+            </script>
+
+  ComputeNodesWindows:
+    DependsOn:
+      - HeadNode
+    Type: AWS::AutoScaling::AutoScalingGroup
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref ComputeNodeInstanceCount
+        Timeout: PT30M
+    Properties:
+      NotificationConfigurations: 
+        - NotificationTypes: 
+          - "autoscaling:EC2_INSTANCE_LAUNCH"
+          TopicARN: !Ref ScalingSNSTopic
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ComputeNodeLaunchTemplateWindows
+        Version: !GetAtt ComputeNodeLaunchTemplateWindows.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet1
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName} - Compute-Nodes'
+          PropagateAtLaunch: true
+      MinSize: '1'
+      MaxSize: '10'
+      DesiredCapacity: !Ref ComputeNodeInstanceCount
+
+Outputs:
+  PublicDnsName:
+    Description: Public DNS name of the head node of the cluster, you could RDP with domain user like hpclab\admin and your specified password in the parameters
+    Value: !GetAtt HeadNode.PublicDnsName
+  PublicIP:
+    Description: Public IP address of the head node of the cluster, you could RDP with domain user like hpclab\admin and your specified password in the parameters
+    Value: !GetAtt HeadNode.PublicIp
+  URL:
+    Description: URL of the HPC Pack Portal
+    Value: !Sub https://${HeadNode.PublicDnsName}/hpc/portal
+  AutoScalingGroupName: 
+    Description: Name of the Auto Scaling Group created
+    Value: !Ref ComputeNodesWindows  
