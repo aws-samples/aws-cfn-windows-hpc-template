@@ -3,12 +3,12 @@ AWSTemplateFormatVersion: 2010-09-09
 Description: >-
   Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
   SPDX-License-Identifier: MIT-0
-  
+
   This template would create HPC Windows Cluster under your aws account with relevant resources in the current region,
   cluster including one head node and one compute node. You would RDP to head-node with DomainNetBIOSName\admin and password to
   get access on the HPC Cluster.
 
-  **WARNING** This template creates EC2 instances, NAT Gateways, Managed Active Directory and related resources. 
+  **WARNING** This template creates EC2 instances, NAT Gateways, Managed Active Directory and related resources.
   You will be billed for the AWS resources used if you create a stack from this template.
 Metadata:
   AWS::CloudFormation::Interface:
@@ -30,15 +30,15 @@ Metadata:
           - DomainNetBIOSName
       - Label:
           default: Cluster Parameters
-        Parameters: 
+        Parameters:
           - ComputeNodeInstanceCount
-          - ComputeNodeInstanceType 
+          - ComputeNodeInstanceType
           - S3OutputBucketName
       - Label:
           default: Notification Parameters
-        Parameters: 
+        Parameters:
           - ScalingNotificationEmail
-    ParameterLabels: 
+    ParameterLabels:
       DomainDNSName:
         default: Domain DNS Name
       DomainNetBIOSName:
@@ -59,7 +59,7 @@ Metadata:
         default: Scaling Notification Email Address
       S3OutputBucketName:
         default: Output Bucket Name
-Parameters: 
+Parameters:
   DomainDNSName:
     Description:  Fully qualified domain name (FQDN) of the forest root domain e.g. hpclab.local.
     Default: hpclab.local
@@ -90,10 +90,12 @@ Parameters:
     Type: String
     AllowedValues:
       - us-east-1
-      - us-east-2 
-      - us-west-1 
+      - us-east-2
+      - us-west-1
       - us-west-2
-    ConstraintDescription: Must be string as one of us-east-1, us-east-2, us-west-1 and us-west-2.
+      - us-gov-west-1
+      - us-gov-east-1
+    ConstraintDescription: Must be string as one of us-east-1, us-east-2, us-west-1, us-west-2, us-gov-west-1, or us-gov-east-1.
   S3OutputBucketName:
     Description: The S3 bucket name of the installation materials, the input should not contain prefix
     Type: String
@@ -101,7 +103,7 @@ Parameters:
     Description: >-
       The Id of Amazon Machine Image to use for the platforms (all machines are started using the same AMI). Please use Microsoft
       Windows Server 2016 Base, Datacenter edition in the current CloudFormation region. Leverages Parameter Store to retrieve Image ID
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id> 
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-windows-latest/Windows_Server-2016-English-Full-Base
   ComputeNodeInstanceCount:
     Description: Number of instances for the compute node, minimum 1, the number is limited by the service limit of your aws account
@@ -111,24 +113,24 @@ Parameters:
     MaxValue: 10
   ScalingNotificationEmail:
     Description: Email address to which we'll send scaling notifications
-    Type: String 
+    Type: String
     AllowedPattern: ^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$
     ConstraintDescription: Must be a valid email address
   ComputeNodeInstanceType:
     Type: String
     Default: m5.xlarge
     Description: Pick instance type.
-    AllowedValues: 
+    AllowedValues:
       - m5.large
       - m5.xlarge
       - m5.2xlarge
       - m5.4xlarge
-      - m5.8xlarge 
+      - m5.8xlarge
       - m6i.large
       - m6i.xlarge
       - m6i.2xlarge
       - m6i.4xlarge
-      - m6i.8xlarge  
+      - m6i.8xlarge
 
 Resources:
   VPC:
@@ -178,7 +180,7 @@ Resources:
         Domain: vpc
 
   PublicRouteTable1:
-    Type: AWS::EC2::RouteTable 
+    Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -194,7 +196,7 @@ Resources:
       GatewayId: !Ref InternetGateway
 
   PublicRouteTable2:
-    Type: AWS::EC2::RouteTable 
+    Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -267,7 +269,7 @@ Resources:
           Value: !Sub '${AWS::StackName} - Private Subnet1'
 
   PrivateRouteTable1:
-    Type: AWS::EC2::RouteTable 
+    Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -295,7 +297,7 @@ Resources:
           Value: !Sub '${AWS::StackName} - Private Subnet2'
 
   PrivateRouteTable2:
-    Type: AWS::EC2::RouteTable 
+    Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
@@ -325,16 +327,16 @@ Resources:
         - !Ref PrivateRouteTable2
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
       VpcId: !Ref VPC
-      PolicyDocument: 
+      PolicyDocument:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal: "*"
             Action: "s3:*"
-            Resource: "arn:aws:s3:::*"
-            Condition: 
+            Resource: !Sub "arn:${AWS::Partition}:s3:::*"
+            Condition:
               StringEquals:
-                "s3:ResourceAccount": !Ref "AWS::AccountId" 
+                "s3:ResourceAccount": !Ref "AWS::AccountId"
 
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -363,20 +365,20 @@ Resources:
           Value: !Sub '${AWS::StackName} - SecurityGroup'
 
   ClusterSecurityGroupIngress:
-    Type: AWS::EC2::SecurityGroupIngress 
+    Type: AWS::EC2::SecurityGroupIngress
     Properties:
       Description: Allowing all communication between instances inside security group
       GroupId: !GetAtt InstanceSecurityGroup.GroupId
       IpProtocol: "-1"
       FromPort: -1
       SourceSecurityGroupId: !GetAtt InstanceSecurityGroup.GroupId
-       
+
   MicrosoftAD:
     Type: AWS::DirectoryService::MicrosoftAD
     Properties:
       Name: !Ref DomainDNSName
       ShortName: !Ref DomainNetBIOSName
-      Password: !Sub '{{resolve:secretsmanager:${ClusterSecrets}:SecretString:HPCUserPassword}}'  
+      Password: !Sub '{{resolve:secretsmanager:${ClusterSecrets}:SecretString:HPCUserPassword}}'
       Edition: Standard
       VpcSettings:
         SubnetIds:
@@ -386,8 +388,8 @@ Resources:
 
   ScalingSNSTopic:
     Type: AWS::SNS::Topic
-    Properties: 
-      Subscription: 
+    Properties:
+      Subscription:
         - Endpoint: !Ref ScalingNotificationEmail
           Protocol: "email"
 
@@ -404,7 +406,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Path: /
-      ManagedPolicyArns: 
+      ManagedPolicyArns:
         - !Ref HPCHeadNodeManagedPolicy
       Tags:
         - Key: Name
@@ -423,10 +425,10 @@ Resources:
               - s3:ListBucket
             Resource:
               - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}
-              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}/* 
+              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}/*
           - Effect: Allow
             Action: secretsmanager:GetSecretValue
-            Resource: 
+            Resource:
               - !Ref ClusterSecrets
               - !Ref CertPassword
           - Effect: Allow
@@ -436,14 +438,14 @@ Resources:
           - Effect: Allow
             Action:
               - ec2:DescribeTags
-            Resource: "*" 
+            Resource: "*"
 
   HPCInstanceManagedPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       PolicyDocument:
         Version: "2012-10-17"
-        Statement:       
+        Statement:
           - Effect: Allow
             Action:
               - s3:GetObject
@@ -451,9 +453,9 @@ Resources:
               - s3:PutObject
             Resource:
               - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}
-              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}/*  
+              - !Sub arn:${AWS::Partition}:s3:::${S3BucketName}/*
               - !Sub arn:${AWS::Partition}:s3:::${S3OutputBucketName}
-              - !Sub arn:${AWS::Partition}:s3:::${S3OutputBucketName}/*  
+              - !Sub arn:${AWS::Partition}:s3:::${S3OutputBucketName}/*
           - Effect: Allow
             Action:
               - autoscaling:SetDesiredCapacity
@@ -463,15 +465,15 @@ Resources:
                 "StringEquals": {
                     "autoscaling:ResourceTag/aws:cloudformation:logical-id": "ComputeNodesWindows"
                 }
-            } 
+            }
           - Effect: Allow
             Action:
               - ec2:DescribeTags
-            Resource: "*"  
+            Resource: "*"
           - Effect: Allow
             Action: secretsmanager:GetSecretValue
-            Resource: 
-              - !Ref ClusterSecrets 
+            Resource:
+              - !Ref ClusterSecrets
               - !Ref CertPassword
           - Effect: Allow
             Action:
@@ -492,7 +494,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Path: /
-      ManagedPolicyArns: 
+      ManagedPolicyArns:
         - !Ref HPCInstanceManagedPolicy
       Tags:
         - Key: Name
@@ -520,7 +522,7 @@ Resources:
         SecretStringTemplate: !Join
           - ''
           - - '{'
-            - !Sub '"HPCUserName": "${DomainNetBIOSName}\\admin",' 
+            - !Sub '"HPCUserName": "${DomainNetBIOSName}\\admin",'
             - !Sub '"HPCBIOSName": "${DomainNetBIOSName}",'
             - !Sub '"HPCDNSName": "${DomainDNSName}"'
             - '}'
@@ -528,18 +530,18 @@ Resources:
         PasswordLength: 12
         ExcludeCharacters: '"@/\''$`'
 
-  CertPassword: 
+  CertPassword:
     Type: AWS::SecretsManager::Secret
     Properties:
       Description: Certificate Secret for HPC Pack 2019
-      GenerateSecretString: 
+      GenerateSecretString:
         SecretStringTemplate: "{}"
         GenerateStringKey: "certPassword"
         PasswordLength: 12
         ExcludeCharacters: '"@/\''$`'
-  
+
   HeadNode:
-    Type: AWS::EC2::Instance 
+    Type: AWS::EC2::Instance
     Metadata:
       'AWS::CloudFormation::Authentication':
         rolebased:
@@ -554,10 +556,10 @@ Resources:
             - 2-run
         1-setup:
           sources:
-            'C:\cfn\install': !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/ScriptsForHeadNode2019.zip'
+            'C:\cfn\install': !Sub 'https://${S3BucketName}.s3.${S3Region}.${AWS::URLSuffix}/ScriptsForHeadNode2019.zip'
           files:
             'C:\cfn\install\HPCPack.zip':
-              source: !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/HPCPack.zip'
+              source: !Sub 'https://${S3BucketName}.s3.${S3Region}.${AWS::URLSuffix}/HPCPack.zip'
               authentication: rolebased
         2-run:
           commands:
@@ -565,7 +567,7 @@ Resources:
               command: powershell.exe -ExecutionPolicy Unrestricted Rename-Computer -NewName head-node -Restart
               waitAfterCompletion: forever
             02-JoinDomain:
-              command: !Sub 
+              command: !Sub
                 - powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\JoinDomain.ps1 ${ClusterSecrets} ${ADIps}
                 - ADIps: !Join [",", !GetAtt [MicrosoftAD, DnsIpAddresses]]
               waitAfterCompletion: forever
@@ -587,7 +589,7 @@ Resources:
     Properties:
       ImageId: !Ref AMIId
       InstanceType: !Ref ComputeNodeInstanceType
-      IamInstanceProfile: !Ref HPCHeadNodeInstanceProfile 
+      IamInstanceProfile: !Ref HPCHeadNodeInstanceProfile
       Monitoring: true
       BlockDeviceMappings:
         - DeviceName: /dev/sda1
@@ -595,7 +597,7 @@ Resources:
             DeleteOnTermination: true
             Encrypted: true
             VolumeSize: 60
-            VolumeType: gp3 
+            VolumeType: gp3
       NetworkInterfaces:
         - AssociatePublicIpAddress: true
           DeviceIndex: "0"
@@ -628,11 +630,11 @@ Resources:
             - 2-run
         1-setup:
           sources:
-            'C:\cfn\install': !Sub 'https://${S3BucketName}.s3.${S3Region}.amazonaws.com/ScriptsForComputeNode2019.zip'
+            'C:\cfn\install': !Sub 'https://${S3BucketName}.s3.${S3Region}.${AWS::URLSuffix}/ScriptsForComputeNode2019.zip'
         2-run:
           commands:
             01-JoinDomain:
-              command: !Sub 
+              command: !Sub
                 - powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\JoinDomain.ps1 ${ClusterSecrets} ${ADIps}
                 - ADIps: !Join [",", !GetAtt [MicrosoftAD, DnsIpAddresses]]
             02-AddUser:
@@ -650,13 +652,13 @@ Resources:
             05-Success:
               command: !Sub 'cfn-signal.exe -e %ERRORLEVEL% --stack ${AWS::StackName} --resource ComputeNodesWindows --region ${AWS::Region}'
     Properties:
-      LaunchTemplateData: 
+      LaunchTemplateData:
         ImageId: !Ref AMIId
         InstanceType: !Ref ComputeNodeInstanceType
         IamInstanceProfile:
           Name: !Ref HPCInstanceProfile
         Monitoring:
-          Enabled: true 
+          Enabled: true
         BlockDeviceMappings:
           - DeviceName: /dev/sda1
             Ebs:
@@ -682,8 +684,8 @@ Resources:
         Count: !Ref ComputeNodeInstanceCount
         Timeout: PT30M
     Properties:
-      NotificationConfigurations: 
-        - NotificationTypes: 
+      NotificationConfigurations:
+        - NotificationTypes:
           - "autoscaling:EC2_INSTANCE_LAUNCH"
           TopicARN: !Ref ScalingSNSTopic
       LaunchTemplate:
@@ -710,6 +712,6 @@ Outputs:
   URL:
     Description: URL of the HPC Pack Portal
     Value: !Sub https://${HeadNode.PublicDnsName}/hpc/portal
-  AutoScalingGroupName: 
+  AutoScalingGroupName:
     Description: Name of the Auto Scaling Group created
-    Value: !Ref ComputeNodesWindows  
+    Value: !Ref ComputeNodesWindows
