@@ -637,19 +637,19 @@ Resources:
               command: !Sub
                 - powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\JoinDomain.ps1 ${ClusterSecrets} ${ADIps}
                 - ADIps: !Join [",", !GetAtt [MicrosoftAD, DnsIpAddresses]]
-            02-AddUser:
-              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\AddUser.ps1 ${ClusterSecrets}
-              waitAfterCompletion: '0'
-            03-PreInstall:
-              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\PreInstall.ps1 ${ClusterSecrets}
-              waitAfterCompletion: '5'
-            04-SetupProcess:
-              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\SetupProcessCompute.ps1 ${ClusterSecrets} ${CertPassword}
-              waitAfterCompletion: '0'
-            05-InstallPackages:
+            02-InstallPackages:
               command: powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\install-packages.ps1
               waitAfterCompletion: '0'
-            05-Success:
+            03-AddUser:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\AddUser.ps1 ${ClusterSecrets}
+              waitAfterCompletion: '0'
+            04-PreInstall:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\PreInstall.ps1 ${ClusterSecrets}
+              waitAfterCompletion: '5'
+            05-SetupProcess:
+              command: !Sub powershell.exe -ExecutionPolicy Unrestricted C:\cfn\install\SetupProcessCompute.ps1 ${ClusterSecrets} ${CertPassword}
+              waitAfterCompletion: '0'
+            06-Success:
               command: !Sub 'cfn-signal.exe -e %ERRORLEVEL% --stack ${AWS::StackName} --resource ComputeNodesWindows --region ${AWS::Region}'
     Properties:
       LaunchTemplateData:
