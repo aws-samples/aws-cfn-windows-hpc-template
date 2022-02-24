@@ -2,14 +2,14 @@
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
-This sample, non-production-ready PowerShell script performs EnergyPlus simulations for HPC workloads on HPC Pack cluster worker nodes.  
-© 2021 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.  
-This AWS Content is provided subject to the terms of the AWS Customer Agreement available at  
+This sample, non-production-ready PowerShell script performs EnergyPlus simulations for HPC workloads on HPC Pack cluster worker nodes.
+© 2021 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.
+This AWS Content is provided subject to the terms of the AWS Customer Agreement available at
 http://aws.amazon.com/agreement or other written agreement between Customer and either
 Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both. #>
 
 #set case variable that pulls from parametric job * iteration
-param([Int32]$case=1) 
+param([Int32]$case=1)
 
 #set instance id from metadata
 $instanceId = (New-Object System.Net.WebClient).DownloadString("http://169.254.169.254/latest/meta-data/instance-id")
@@ -20,6 +20,7 @@ $stackName = Get-EC2Tag | ` Where-Object {$_.ResourceId -eq $instanceId -and $_.
 #$S3BucketName | ForEach-Object {$_.ParameterValue}
 
 $S3BucketName = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 'S3BucketName'}).ParameterValue
+$S3BucketRegion = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 'S3Region'}).ParameterValue
 $S3OutputBucketName = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 'S3OutputBucketName'}).ParameterValue
 $HPCPackUrl = ((Get-CFNStack -StackName $stackName).Outputs | where {$_.OutputKey -eq 'URL'}).OutputValue
 
@@ -80,7 +81,7 @@ C:\EnergyPlus\EnergyPlus-9.5.0-de239b2e5f-Windows-x86_64\energyplus -i \Energy+.
 #Remove-Item 'C:\Users\$case\admin\input\idf' -Recurse
 
 #write output files to s3
-Write-S3Object -BucketName $S3OutputBucketName -Folder C:\output\$case\ -KeyPrefix output\$case\
+Write-S3Object -BucketName $S3OutputBucketName -Folder C:\output\$case\ -KeyPrefix output\$case\ -Region $S3BucketRegion
 
 #remove idf files
 Remove-Item 'C:\EnergyPlus\EnergyPlus-9.5.0-de239b2e5f-Windows-x86_64\ExampleFiles\idf\' -Recurse
