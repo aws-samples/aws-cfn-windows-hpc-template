@@ -20,9 +20,6 @@ $S3BucketRegion = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey
 $S3OutputBucketName = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 'S3OutputBucketName'}).ParameterValue
 $HPCPackUrl = ((Get-CFNStack -StackName $stackName).Outputs | where {$_.OutputKey -eq 'URL'}).OutputValue
 
-Write-Host $S3BucketName
-Write-Host $S3OutputBucketName
-
 Write-Host "running EnergyPlus simulation for case $case..."
 
 #make output directory
@@ -41,7 +38,6 @@ Write-S3Object -BucketName $S3OutputBucketName -Folder C:\output\$case\ -KeyPref
 
 #simulation completed
 Write-Host "Finished simulation for case $case"
-Write-Host "Removed idf and epw inputs for case $case"
 Write-Host "Instance that performed simulation: $instanceId"
 Write-Host "S3Bucket: $S3BucketName"
 Write-Host "S3 Output Bucket: $S3OutputBucketName"
