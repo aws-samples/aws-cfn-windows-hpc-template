@@ -1,12 +1,12 @@
-<#
+ <#
 Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 SPDX-License-Identifier: MIT-0
 
-This sample, non-production-ready PowerShell script downloads EnergyPlus HPC software on HPC Pack cluster head node and uploads to S3.  
-© 2021 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.  
-This AWS Content is provided subject to the terms of the AWS Customer Agreement available at  
+This sample, non-production-ready PowerShell script downloads EnergyPlus HPC software on HPC Pack cluster head node and uploads to S3.
+©¿½ 2021 Amazon Web Services, Inc. or its affiliates. All Rights Reserved.
+This AWS Content is provided subject to the terms of the AWS Customer Agreement available at
 http://aws.amazon.com/agreement or other written agreement between Customer and either
-Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both. 
+Amazon Web Services, Inc. or Amazon Web Services EMEA SARL or both.
 
 #>
 
@@ -15,7 +15,8 @@ $instanceId = (New-Object System.Net.WebClient).DownloadString("http://169.254.1
 $stackName = Get-EC2Tag | ` Where-Object {$_.ResourceId -eq $instanceId -and $_.Key -eq 'aws:cloudformation:stack-name'} | Select-Object -ExpandProperty Value
 
 #Returns a Stack instance describing the specified stack
-$s3BucketName = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 's3BucketName'}).ParameterValue
+$s3BucketName = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 'S3BucketName'}).ParameterValue
+$s3BucketRegion = ((get-cfnstack $stackName).Parameters | where {$_.ParameterKey -eq 'S3Region'}).ParameterValue
 
 Write-Host "Installing EnergyPlus"
 cd C:\
@@ -41,7 +42,7 @@ Write-Host $energyPlusHash
 if ($downloadedHash.hash -ne $energyPlusHash){
     Write-Host "The hash values do not match" -ForegroundColor Red
     Remove-Item 'C:\EnergyPlus.zip' -Force -Recurse
-    
+
     Write-Host "Deleting EnergyPlus.zip - possible security threat detected" -ForegroundColor Red
     Write-Host "Exiting script" -ForegroundColor Red
     exit
@@ -50,6 +51,6 @@ if ($downloadedHash.hash -ne $energyPlusHash){
 }
 
 #write EnergyPlus to S3
-Write-S3Object -BucketName $s3BucketName -Key "EnergyPlus.zip" -File .\EnergyPlus.zip
+Write-S3Object -BucketName $s3BucketName -Key EnergyPlus.zip -File C:\EnergyPlus.zip -Region $s3BucketRegion
 
 Write-Host "EnergyPlus has successfully uploaded to S3"
