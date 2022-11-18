@@ -95,6 +95,7 @@ Parameters:
       - us-west-2
       - us-gov-west-1
       - us-gov-east-1
+      - eu-west-1
     ConstraintDescription: Must be string as one of us-east-1, us-east-2, us-west-1, us-west-2, us-gov-west-1, or us-gov-east-1.
   S3OutputBucketName:
     Description: The S3 bucket name of the installation materials, the input should not contain prefix
@@ -337,7 +338,11 @@ Resources:
             Condition:
               StringEquals:
                 "s3:ResourceAccount": !Ref "AWS::AccountId"
-
+          - Effect: Allow # Allows access to buckets that contains various components of the solution
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::cloudformation-waitcondition-${AWS::Region}/*
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
